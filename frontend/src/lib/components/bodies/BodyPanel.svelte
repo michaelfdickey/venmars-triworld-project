@@ -3,6 +3,9 @@
 	import AtmosphereTab from './subtabs/AtmosphereTab.svelte';
 	import MapTab from './subtabs/MapTab.svelte';
 	import ProductionTab from './subtabs/ProductionTab.svelte';
+	import RocketsTab from './subtabs/RocketsTab.svelte';
+	import PayloadsTab from './subtabs/PayloadsTab.svelte';
+	import MissionsTab from './subtabs/MissionsTab.svelte';
 	import LaunchTab from './subtabs/LaunchTab.svelte';
 	import PopulationTab from './subtabs/PopulationTab.svelte';
 	import VenusAltitudeSelector from './VenusAltitudeSelector.svelte';
@@ -15,6 +18,9 @@
 		{ id: 'atmosphere', label: 'Atmosphere' },
 		{ id: 'map', label: 'Planetary Map' },
 		{ id: 'production', label: 'Production' },
+		{ id: 'rockets', label: 'Rockets' },
+		{ id: 'payloads', label: 'Payloads' },
+		{ id: 'missions', label: 'Missions' },
 		{ id: 'launch', label: 'Payload to Orbit' },
 		{ id: 'population', label: 'Population' }
 	];
@@ -77,6 +83,12 @@
 			<MapTab {bodyId} />
 		{:else if activeSubTab === 'production'}
 			<ProductionTab {bodyId} />
+		{:else if activeSubTab === 'rockets'}
+			<RocketsTab {bodyId} />
+		{:else if activeSubTab === 'payloads'}
+			<PayloadsTab {bodyId} />
+		{:else if activeSubTab === 'missions'}
+			<MissionsTab {bodyId} />
 		{:else if activeSubTab === 'launch'}
 			<LaunchTab {bodyId} />
 		{:else if activeSubTab === 'population'}

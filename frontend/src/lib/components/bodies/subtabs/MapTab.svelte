@@ -1,5 +1,6 @@
 <script lang="ts">
 	import EarthMap from './EarthMap.svelte';
+	import MoonMap from './MoonMap.svelte';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -16,6 +17,8 @@
 
 {#if bodyId === 'earth'}
 	<EarthMap />
+{:else if bodyId === 'moon'}
+	<MoonMap />
 {:else}
 <div>
 	<h3 class="text-lg font-semibold mb-4">{cfg.label}</h3>

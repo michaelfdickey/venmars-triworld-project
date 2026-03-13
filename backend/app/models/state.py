@@ -61,6 +61,7 @@ class CelestialBodyState(BaseModel):
     atmosphere: Atmosphere = Field(default_factory=Atmosphere)
     production: ProductionCapacity = Field(default_factory=ProductionCapacity)
     launch_capacity: LaunchCapacity = Field(default_factory=LaunchCapacity)
+    rocket_inventory: dict[str, int] = Field(default_factory=dict)
     population: int = 0
     unlocked: bool = False
 
@@ -98,6 +99,18 @@ class GameState(BaseModel):
             launch_sites=5, max_payload_kg=150_000,
             launches_per_year=50, total_mass_to_orbit_kg_per_year=5_000_000,
         ),
+        rocket_inventory={
+            "Starship / Super Heavy": 1,
+            "Falcon Heavy": 1,
+            "Falcon 9 Block 5": 1,
+            "SLS Block 2": 1,
+            "New Glenn": 1,
+            "Vulcan Centaur": 1,
+            "Long March 9": 1,
+            "Ariane 6 (A64)": 1,
+            "Neutron": 1,
+            "Terran R": 1,
+        },
     ))
     moon: CelestialBodyState = Field(default_factory=lambda: CelestialBodyState(
         name="Moon",

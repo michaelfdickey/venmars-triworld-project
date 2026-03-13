@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import L from 'leaflet';
-	import 'leaflet/dist/leaflet.css';
+	import type L from 'leaflet';
 
 	interface LaunchSite {
 		name: string;
@@ -28,7 +27,10 @@
 	let mapContainer: HTMLDivElement;
 	let map: L.Map;
 
-	onMount(() => {
+	onMount(async () => {
+		const L = await import('leaflet');
+		await import('leaflet/dist/leaflet.css');
+
 		map = L.map(mapContainer, {
 			center: [20, 0],
 			zoom: 2,
@@ -40,9 +42,8 @@
 			maxBoundsViscosity: 1.0,
 		});
 
-		// Dark-themed tile layer
-		L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-			subdomains: 'abcd',
+		// Satellite imagery tile layer (rich & colorful)
+		L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
 			maxZoom: 19,
 		}).addTo(map);
 
@@ -51,7 +52,7 @@
 
 		// Attribution bottom-right
 		L.control.attribution({ position: 'bottomright', prefix: false })
-			.addAttribution('&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OSM</a> &copy; <a href="https://carto.com/" target="_blank" rel="noopener">CARTO</a>')
+			.addAttribution('&copy; <a href="https://www.esri.com/" target="_blank" rel="noopener">Esri</a> &middot; Sources: Esri, Maxar, Earthstar Geographics')
 			.addTo(map);
 
 		// Custom launch site icon
@@ -136,9 +137,9 @@
 		width: 12px;
 		height: 12px;
 		border-radius: 50%;
-		background: rgba(59, 130, 246, 0.8);
-		border: 2px solid rgba(59, 130, 246, 0.4);
-		box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+		background: rgba(239, 68, 68, 0.8);
+		border: 2px solid rgba(239, 68, 68, 0.4);
+		box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
 	}
 
 	/* Marker styles */
@@ -151,12 +152,12 @@
 		position: absolute;
 		top: 50%;
 		left: 50%;
-		width: 8px;
-		height: 8px;
-		margin: -4px 0 0 -4px;
-		background: #3b82f6;
+		width: 10px;
+		height: 10px;
+		margin: -5px 0 0 -5px;
+		background: #ef4444;
 		border-radius: 50%;
-		box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
+		box-shadow: 0 0 10px rgba(239, 68, 68, 0.9);
 		z-index: 2;
 	}
 
@@ -164,10 +165,10 @@
 		position: absolute;
 		top: 50%;
 		left: 50%;
-		width: 20px;
-		height: 20px;
-		margin: -10px 0 0 -10px;
-		border: 2px solid rgba(59, 130, 246, 0.5);
+		width: 22px;
+		height: 22px;
+		margin: -11px 0 0 -11px;
+		border: 2px solid rgba(239, 68, 68, 0.6);
 		border-radius: 50%;
 		animation: pulse-ring 2s ease-out infinite;
 	}

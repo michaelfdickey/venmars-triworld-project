@@ -21,6 +21,7 @@
 		{ name: 'Skilled Labor & Training', icon: '👷', description: 'Engineers, technicians, operators, pilots', color: '#ec4899' },
 		{ name: 'Mission Operations', icon: '🖥️', description: 'Ground control, communications, tracking', color: '#14b8a6' },
 		{ name: 'Spaceport Construction', icon: '🏗️', description: 'New launch site development worldwide', color: '#f59e0b' },
+		{ name: 'Energy & Utilities', icon: '⚡', description: 'Electricity, water, gas for all program operations', color: '#facc15' },
 	];
 
 	// Build reactive categories from store + defs

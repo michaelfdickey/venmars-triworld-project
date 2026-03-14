@@ -78,7 +78,7 @@ export const gameState = writable<GameState | null>(null);
 export const activeTab = writable<string>('earth');
 
 // Persistent spending allocations (survive tab switches)
-export const spendingAllocations = writable<number[]>([85, 210, 45, 120, 65, 55, 95, 40, 30, 75]);
+export const spendingAllocations = writable<number[]>([85, 210, 45, 120, 65, 55, 95, 40, 30, 75, 35]);
 export const spendingReserves = writable<number>(320);
 
 // Claimed launch complexes (by site id)
@@ -131,12 +131,13 @@ export const materialDefs: MaterialDef[] = [
 	{ name: 'RP-1 Kerosene',         globalMt: 0.05,    costPerMt: 1200,    color: '#fde047', spendingCategoryIndex: 2 },
 	{ name: 'Hydrazine',             globalMt: 0.03,    costPerMt: 45000,   color: '#f87171', spendingCategoryIndex: 2 },
 	{ name: 'Xenon',                 globalMt: 0.00004, costPerMt: 3500000, color: '#c4b5fd', spendingCategoryIndex: 2 },
+	{ name: 'Electricity',           globalMt: 29000,   costPerMt: 50,      color: '#facc15', spendingCategoryIndex: 10 },  // globalMt = TWh/yr, costPerMt = $M/TWh
 ];
 
 // Persistent material allocations (% of global production) — survives tab switches
 export const materialAllocations = writable<number[]>(
 	materialDefs.map((_, i) => {
-		const defaults = [0.02, 0.15, 0.03, 8.0, 0.08, 0.5, 1.2, 12.0, 22.0, 0.001, 0.01, 0.005, 0.002, 60.0, 35.0, 25.0];
+		const defaults = [0.02, 0.15, 0.03, 8.0, 0.08, 0.5, 1.2, 12.0, 22.0, 0.001, 0.01, 0.005, 0.002, 60.0, 35.0, 25.0, 0.05];
 		return defaults[i] ?? 0;
 	})
 );
@@ -146,3 +147,80 @@ export function materialCostB(matIndex: number, pct: number): number {
 	const m = materialDefs[matIndex];
 	return (m.globalMt * (pct / 100) * m.costPerMt) / 1000;
 }
+
+// ── Consumption data ──────────────────────────────────────────────
+// Consumption category indices mirror spending categories (0-10)
+// Each consumption demand item is { name, material, amountMt, color }
+
+export interface ConsumptionDemandItem {
+	name: string;        // source label e.g. "Kennedy SC (LC-39A)"
+	material: string;    // material name e.g. "Steel"
+	amountMt: number;    // annual consumption in Mt (or TWh for electricity)
+	color: string;
+}
+
+// Material consumption profiles per launch complex (annual, in tonnes unless TWh)
+export interface LaunchComplexConsumption {
+	name: string;
+	items: { material: string; amountMt: number }[];
+}
+
+export const launchComplexConsumption: Record<string, LaunchComplexConsumption> = {
+	'ksc-39a':      { name: 'Kennedy SC (LC-39A)',    items: [
+		{ material: 'Steel', amountMt: 0.012 }, { material: 'Concrete / Cement', amountMt: 0.05 },
+		{ material: 'LOX', amountMt: 0.45 }, { material: 'LCH₄', amountMt: 0.18 },
+		{ material: 'RP-1 Kerosene', amountMt: 0.008 }, { material: 'Electricity', amountMt: 2.1 },
+		{ material: 'Copper', amountMt: 0.0008 }, { material: 'Aluminum', amountMt: 0.003 },
+	] },
+	'ccafs-40':     { name: 'Cape Canaveral (SLC-40)', items: [
+		{ material: 'Steel', amountMt: 0.008 }, { material: 'Concrete / Cement', amountMt: 0.03 },
+		{ material: 'LOX', amountMt: 0.35 }, { material: 'RP-1 Kerosene', amountMt: 0.012 },
+		{ material: 'LCH₄', amountMt: 0.1 }, { material: 'Electricity', amountMt: 1.8 },
+		{ material: 'Copper', amountMt: 0.0005 }, { material: 'Aluminum', amountMt: 0.002 },
+	] },
+	'baikonur':     { name: 'Baikonur Cosmodrome',    items: [
+		{ material: 'Steel', amountMt: 0.015 }, { material: 'Concrete / Cement', amountMt: 0.08 },
+		{ material: 'LOX', amountMt: 0.25 }, { material: 'RP-1 Kerosene', amountMt: 0.01 },
+		{ material: 'Hydrazine', amountMt: 0.0004 }, { material: 'Electricity', amountMt: 1.5 },
+		{ material: 'Copper', amountMt: 0.0006 },
+	] },
+	'vandenberg':   { name: 'Vandenberg SFB',         items: [
+		{ material: 'Steel', amountMt: 0.007 }, { material: 'Concrete / Cement', amountMt: 0.025 },
+		{ material: 'LOX', amountMt: 0.3 }, { material: 'RP-1 Kerosene', amountMt: 0.011 },
+		{ material: 'LCH₄', amountMt: 0.08 }, { material: 'Electricity', amountMt: 1.6 },
+		{ material: 'Copper', amountMt: 0.0004 },
+	] },
+	'xichang':      { name: 'Xichang SLC',            items: [
+		{ material: 'Steel', amountMt: 0.006 }, { material: 'Concrete / Cement', amountMt: 0.04 },
+		{ material: 'LOX', amountMt: 0.15 }, { material: 'LH₂', amountMt: 0.03 },
+		{ material: 'Hydrazine', amountMt: 0.0003 }, { material: 'Electricity', amountMt: 1.2 },
+	] },
+	'wenchang':     { name: 'Wenchang SLS',           items: [
+		{ material: 'Steel', amountMt: 0.009 }, { material: 'Concrete / Cement', amountMt: 0.035 },
+		{ material: 'LOX', amountMt: 0.2 }, { material: 'LH₂', amountMt: 0.05 },
+		{ material: 'LCH₄', amountMt: 0.06 }, { material: 'Electricity', amountMt: 1.4 },
+		{ material: 'Aluminum', amountMt: 0.002 },
+	] },
+	'jiuquan':      { name: 'Jiuquan SLC',            items: [
+		{ material: 'Steel', amountMt: 0.005 }, { material: 'Concrete / Cement', amountMt: 0.03 },
+		{ material: 'LOX', amountMt: 0.12 }, { material: 'RP-1 Kerosene', amountMt: 0.005 },
+		{ material: 'Hydrazine', amountMt: 0.0002 }, { material: 'Electricity', amountMt: 1.0 },
+	] },
+	'sriharikota':  { name: 'Satish Dhawan SC',       items: [
+		{ material: 'Steel', amountMt: 0.004 }, { material: 'Concrete / Cement', amountMt: 0.02 },
+		{ material: 'LOX', amountMt: 0.1 }, { material: 'LH₂', amountMt: 0.02 },
+		{ material: 'Hydrazine', amountMt: 0.0005 }, { material: 'Electricity', amountMt: 0.8 },
+	] },
+	'kourou':       { name: 'Guiana Space Centre',    items: [
+		{ material: 'Steel', amountMt: 0.01 }, { material: 'Concrete / Cement', amountMt: 0.04 },
+		{ material: 'LOX', amountMt: 0.28 }, { material: 'LH₂', amountMt: 0.06 },
+		{ material: 'Hydrazine', amountMt: 0.0006 }, { material: 'Electricity', amountMt: 1.7 },
+		{ material: 'Aluminum', amountMt: 0.003 },
+	] },
+	'starbase':     { name: 'Starbase Boca Chica',    items: [
+		{ material: 'Steel', amountMt: 0.02 }, { material: 'Concrete / Cement', amountMt: 0.06 },
+		{ material: 'LOX', amountMt: 0.5 }, { material: 'LCH₄', amountMt: 0.25 },
+		{ material: 'Electricity', amountMt: 2.5 },
+		{ material: 'Copper', amountMt: 0.001 }, { material: 'Aluminum', amountMt: 0.005 },
+	] },
+};

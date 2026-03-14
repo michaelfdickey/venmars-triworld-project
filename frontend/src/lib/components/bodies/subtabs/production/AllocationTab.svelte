@@ -28,6 +28,7 @@
 		{ name: 'RP-1 Kerosene', icon: '🛢️', globalProductionPerYear: '0.05 Mt', maxPercent: 100, aerospace: true },
 		{ name: 'Hydrazine', icon: '⚠️', globalProductionPerYear: '0.03 Mt', maxPercent: 100, aerospace: true },
 		{ name: 'Xenon', icon: '💨', globalProductionPerYear: '0.00004 Mt', maxPercent: 100, aerospace: true },
+		{ name: 'Electricity', icon: '⚡', globalProductionPerYear: '29,000 TWh', maxPercent: 10, aerospace: false },
 	];
 
 	let allocations = $derived($materialAllocations);
@@ -48,10 +49,16 @@
 
 	function materialTonnage(index: number): string {
 		const m = materialDefs[index];
-		const mt = m.globalMt * (allocations[index] / 100);
-		if (mt >= 1) return mt.toFixed(1) + ' Mt';
-		if (mt >= 0.001) return (mt * 1000).toFixed(0) + ' kt';
-		return (mt * 1e6).toFixed(0) + ' t';
+		const val = m.globalMt * (allocations[index] / 100);
+		// Electricity uses TWh not Mt
+		if (m.name === 'Electricity') {
+			if (val >= 1) return val.toFixed(1) + ' TWh';
+			if (val >= 0.001) return (val * 1000).toFixed(0) + ' GWh';
+			return (val * 1e6).toFixed(0) + ' MWh';
+		}
+		if (val >= 1) return val.toFixed(1) + ' Mt';
+		if (val >= 0.001) return (val * 1000).toFixed(0) + ' kt';
+		return (val * 1e6).toFixed(0) + ' t';
 	}
 
 	let totalProcurementB = $derived(

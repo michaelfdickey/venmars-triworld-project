@@ -1,52 +1,53 @@
 <script lang="ts">
-	import { difficulty, difficultyConfig } from '$lib/stores/gameStore';
+	import { difficulty, difficultyConfig, materialAllocations, materialDefs, materialCostB as matCostBFn } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
-	interface MaterialAllocation {
+	interface MaterialDisplay {
 		name: string;
 		icon: string;
 		globalProductionPerYear: string;
-		globalMt: number;             // numeric global production in Mt
-		currentSpacePercent: number;
 		maxPercent: number;
 		aerospace: boolean;
-		unit: string;
-		costPerMt: number;            // cost in $M per Mt
-		color: string;
 	}
 
-	const materials: MaterialAllocation[] = [
-		{ name: 'Steel', icon: '🔩', globalProductionPerYear: '1,950 Mt', globalMt: 1950, currentSpacePercent: 0.02, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 800, color: '#a78bfa' },
-		{ name: 'Aluminum', icon: '🪶', globalProductionPerYear: '70 Mt', globalMt: 70, currentSpacePercent: 0.15, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 2400, color: '#38bdf8' },
-		{ name: 'Copper', icon: '🔶', globalProductionPerYear: '25 Mt', globalMt: 25, currentSpacePercent: 0.03, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 8500, color: '#f97316' },
-		{ name: 'Titanium', icon: '⚙️', globalProductionPerYear: '0.24 Mt', globalMt: 0.24, currentSpacePercent: 8.0, maxPercent: 100, aerospace: true, unit: 'Mt', costPerMt: 35000, color: '#818cf8' },
-		{ name: 'Nickel', icon: '🔧', globalProductionPerYear: '3.3 Mt', globalMt: 3.3, currentSpacePercent: 0.08, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 18000, color: '#a3a3a3' },
-		{ name: 'Silicon (Electronic)', icon: '🔲', globalProductionPerYear: '0.6 Mt', globalMt: 0.6, currentSpacePercent: 0.5, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 50000, color: '#22d3ee' },
-		{ name: 'Rare Earth Elements', icon: '💎', globalProductionPerYear: '0.35 Mt', globalMt: 0.35, currentSpacePercent: 1.2, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 120000, color: '#e879f9' },
-		{ name: 'Carbon Fiber', icon: '🧱', globalProductionPerYear: '0.18 Mt', globalMt: 0.18, currentSpacePercent: 12.0, maxPercent: 100, aerospace: true, unit: 'Mt', costPerMt: 25000, color: '#4ade80' },
-		{ name: 'Inconel / Superalloys', icon: '🔥', globalProductionPerYear: '0.08 Mt', globalMt: 0.08, currentSpacePercent: 22.0, maxPercent: 100, aerospace: true, unit: 'Mt', costPerMt: 80000, color: '#fb923c' },
-		{ name: 'Concrete / Cement', icon: '🧱', globalProductionPerYear: '4,100 Mt', globalMt: 4100, currentSpacePercent: 0.001, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 120, color: '#78716c' },
-		{ name: 'LOX', icon: '🧪', globalProductionPerYear: '450 Mt', globalMt: 450, currentSpacePercent: 0.01, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 150, color: '#67e8f9' },
-		{ name: 'LH₂', icon: '🧪', globalProductionPerYear: '94 Mt', globalMt: 94, currentSpacePercent: 0.005, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 3000, color: '#fca5a5' },
-		{ name: 'LCH₄', icon: '🧪', globalProductionPerYear: '180 Mt', globalMt: 180, currentSpacePercent: 0.002, maxPercent: 10, aerospace: false, unit: 'Mt', costPerMt: 600, color: '#86efac' },
-		{ name: 'RP-1 Kerosene', icon: '🛢️', globalProductionPerYear: '0.05 Mt', globalMt: 0.05, currentSpacePercent: 60.0, maxPercent: 100, aerospace: true, unit: 'Mt', costPerMt: 1200, color: '#fde047' },
-		{ name: 'Hydrazine', icon: '⚠️', globalProductionPerYear: '0.03 Mt', globalMt: 0.03, currentSpacePercent: 35.0, maxPercent: 100, aerospace: true, unit: 'Mt', costPerMt: 45000, color: '#f87171' },
-		{ name: 'Xenon', icon: '💨', globalProductionPerYear: '0.00004 Mt', globalMt: 0.00004, currentSpacePercent: 25.0, maxPercent: 100, aerospace: true, unit: 'Mt', costPerMt: 3500000, color: '#c4b5fd' },
+	const materials: MaterialDisplay[] = [
+		{ name: 'Steel', icon: '🔩', globalProductionPerYear: '1,950 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'Aluminum', icon: '🪶', globalProductionPerYear: '70 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'Copper', icon: '🔶', globalProductionPerYear: '25 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'Titanium', icon: '⚙️', globalProductionPerYear: '0.24 Mt', maxPercent: 100, aerospace: true },
+		{ name: 'Nickel', icon: '🔧', globalProductionPerYear: '3.3 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'Silicon (Electronic)', icon: '🔲', globalProductionPerYear: '0.6 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'Rare Earth Elements', icon: '💎', globalProductionPerYear: '0.35 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'Carbon Fiber', icon: '🧱', globalProductionPerYear: '0.18 Mt', maxPercent: 100, aerospace: true },
+		{ name: 'Inconel / Superalloys', icon: '🔥', globalProductionPerYear: '0.08 Mt', maxPercent: 100, aerospace: true },
+		{ name: 'Concrete / Cement', icon: '🧱', globalProductionPerYear: '4,100 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'LOX', icon: '🧪', globalProductionPerYear: '450 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'LH₂', icon: '🧪', globalProductionPerYear: '94 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'LCH₄', icon: '🧪', globalProductionPerYear: '180 Mt', maxPercent: 10, aerospace: false },
+		{ name: 'RP-1 Kerosene', icon: '🛢️', globalProductionPerYear: '0.05 Mt', maxPercent: 100, aerospace: true },
+		{ name: 'Hydrazine', icon: '⚠️', globalProductionPerYear: '0.03 Mt', maxPercent: 100, aerospace: true },
+		{ name: 'Xenon', icon: '💨', globalProductionPerYear: '0.00004 Mt', maxPercent: 100, aerospace: true },
 	];
 
-	let allocations = $state(materials.map(m => m.currentSpacePercent));
+	let allocations = $derived($materialAllocations);
 	let annualBudget = $derived(difficultyConfig[$difficulty].annualBudgetB);
 
-	// Cost for each material in $B: (globalMt * pct/100) * costPerMt_$M / 1000
-	function materialCostB(index: number): number {
-		const m = materials[index];
-		const tonnage = m.globalMt * (allocations[index] / 100);
-		return (tonnage * m.costPerMt) / 1000; // $M to $B
+	function setAllocation(index: number, value: number) {
+		materialAllocations.update(arr => {
+			const next = [...arr];
+			next[index] = value;
+			return next;
+		});
+	}
+
+	// Cost for each material in $B
+	function materialCostBLocal(index: number): number {
+		return matCostBFn(index, allocations[index]);
 	}
 
 	function materialTonnage(index: number): string {
-		const m = materials[index];
+		const m = materialDefs[index];
 		const mt = m.globalMt * (allocations[index] / 100);
 		if (mt >= 1) return mt.toFixed(1) + ' Mt';
 		if (mt >= 0.001) return (mt * 1000).toFixed(0) + ' kt';
@@ -54,7 +55,7 @@
 	}
 
 	let totalProcurementB = $derived(
-		materials.reduce((sum, _, i) => sum + materialCostB(i), 0)
+		materialDefs.reduce((sum, _, i) => sum + materialCostBLocal(i), 0)
 	);
 
 	function formatB(v: number): string {
@@ -65,11 +66,9 @@
 
 	// Set allocation from a cost value in $B
 	function setFromCost(index: number, costB: number) {
-		const m = materials[index];
-		// costB = (globalMt * pct/100 * costPerMt) / 1000
-		// pct = costB * 1000 * 100 / (globalMt * costPerMt)
+		const m = materialDefs[index];
 		const pct = (costB * 100000) / (m.globalMt * m.costPerMt);
-		allocations[index] = Math.max(0, Math.min(m.maxPercent, Math.round(pct * 100) / 100));
+		setAllocation(index, Math.max(0, Math.min(materials[index].maxPercent, Math.round(pct * 100) / 100)));
 	}
 
 	function handleCostInput(index: number, e: Event) {
@@ -101,7 +100,7 @@
 		const rect = track.getBoundingClientRect();
 		const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
 		const max = materials[index].maxPercent;
-		allocations[index] = Math.round(pct * max * 100) / 100;
+		setAllocation(index, Math.round(pct * max * 100) / 100);
 	}
 </script>
 
@@ -150,7 +149,7 @@
 							type="number"
 							min="0"
 							step="0.1"
-							value={formatB(materialCostB(i))}
+							value={formatB(materialCostBLocal(i))}
 							oninput={(e) => handleCostInput(i, e)}
 						/>
 						<span class="alloc-unit">B</span>
@@ -167,8 +166,8 @@
 						onpointercancel={endDrag}
 					>
 						<div class="alloc-bar-fill" class:aerospace-bar={mat.aerospace}
-							style="width: {(allocations[i] / mat.maxPercent) * 100}%; background: {mat.color}"></div>
-						<div class="alloc-bar-thumb" style="left: {(allocations[i] / mat.maxPercent) * 100}%; background: {mat.color}"></div>
+							style="width: {(allocations[i] / mat.maxPercent) * 100}%; background: {materialDefs[i].color}"></div>
+						<div class="alloc-bar-thumb" style="left: {(allocations[i] / mat.maxPercent) * 100}%; background: {materialDefs[i].color}"></div>
 					</div>
 					<span class="alloc-cap">{mat.maxPercent}%</span>
 				</div>

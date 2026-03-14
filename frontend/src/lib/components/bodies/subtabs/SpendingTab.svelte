@@ -1,28 +1,32 @@
 <script lang="ts">
-	import { difficulty, difficultyConfig } from '$lib/stores/gameStore';
+	import { difficulty, difficultyConfig, spendingAllocations, spendingReserves, claimedComplexes, launchComplexCosts, materialAllocations, materialDefs, materialCostB as matCostBFn } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
-	interface SpendCategory {
+	interface SpendCategoryDef {
 		name: string;
 		icon: string;
-		allocated: number;
 		description: string;
 		color: string;
 	}
 
-	const categories: SpendCategory[] = $state([
-		{ name: 'Launch Infrastructure', icon: '🚀', allocated: 85, description: 'Launch pads, integration bays, ground support', color: '#f97316' },
-		{ name: 'Rocket Manufacturing', icon: '🏭', allocated: 210, description: 'Vehicle production, engines, avionics', color: '#ef4444' },
-		{ name: 'Propellant Production', icon: '⚗️', allocated: 45, description: 'LOX, LCH₄, LH₂, RP-1 plants', color: '#a855f7' },
-		{ name: 'Payload Production', icon: '📦', allocated: 120, description: 'Satellites, habitats, containers, equipment', color: '#3b82f6' },
-		{ name: 'R&D', icon: '🔬', allocated: 65, description: 'Advanced propulsion, materials science, life support', color: '#06b6d4' },
-		{ name: 'Mining & Extraction', icon: '⛏️', allocated: 55, description: 'Iron, aluminum, titanium, rare earth mines', color: '#84cc16' },
-		{ name: 'Refining & Materials', icon: '🔩', allocated: 95, description: 'Steel mills, alloy foundries, composite plants', color: '#eab308' },
-		{ name: 'Skilled Labor & Training', icon: '👷', allocated: 40, description: 'Engineers, technicians, operators, pilots', color: '#ec4899' },
-		{ name: 'Mission Operations', icon: '🖥️', allocated: 30, description: 'Ground control, communications, tracking', color: '#14b8a6' },
-		{ name: 'Spaceport Construction', icon: '🏗️', allocated: 75, description: 'New launch site development worldwide', color: '#f59e0b' },
-	]);
+	const categoryDefs: SpendCategoryDef[] = [
+		{ name: 'Launch Infrastructure', icon: '🚀', description: 'Launch pads, integration bays, ground support', color: '#f97316' },
+		{ name: 'Rocket Manufacturing', icon: '🏭', description: 'Vehicle production, engines, avionics', color: '#ef4444' },
+		{ name: 'Propellant Production', icon: '⚗️', description: 'LOX, LCH₄, LH₂, RP-1 plants', color: '#a855f7' },
+		{ name: 'Payload Production', icon: '📦', description: 'Satellites, habitats, containers, equipment', color: '#3b82f6' },
+		{ name: 'R&D', icon: '🔬', description: 'Advanced propulsion, materials science, life support', color: '#06b6d4' },
+		{ name: 'Mining & Extraction', icon: '⛏️', description: 'Iron, aluminum, titanium, rare earth mines', color: '#84cc16' },
+		{ name: 'Refining & Materials', icon: '🔩', description: 'Steel mills, alloy foundries, composite plants', color: '#eab308' },
+		{ name: 'Skilled Labor & Training', icon: '👷', description: 'Engineers, technicians, operators, pilots', color: '#ec4899' },
+		{ name: 'Mission Operations', icon: '🖥️', description: 'Ground control, communications, tracking', color: '#14b8a6' },
+		{ name: 'Spaceport Construction', icon: '🏗️', description: 'New launch site development worldwide', color: '#f59e0b' },
+	];
+
+	// Build reactive categories from store + defs
+	let categories = $derived(
+		categoryDefs.map((def, i) => ({ ...def, allocated: $spendingAllocations[i] ?? 0 }))
+	);
 
 	let totalAllocated = $derived(categories.reduce((sum, c) => sum + c.allocated, 0));
 	let annualBudget = $derived(difficultyConfig[$difficulty].annualBudgetB);
@@ -30,15 +34,140 @@
 	let surplus = $derived(Math.max(0, remaining));
 	let deficit = $derived(Math.max(0, -remaining));
 
-	// Reserve fund: accumulates surplus each year (placeholder)
-	let reserves = $state(320);
+	let reserves = $derived($spendingReserves);
 	let reserveCapacity = 2000;
+
+	// ── Cost demands from claimed launch complexes ──
+	interface CostDemandItem {
+		name: string;
+		costB: number;
+		color: string;
+	}
+
+	let claimedLaunchCosts = $derived.by(() => {
+		const items: CostDemandItem[] = [];
+		const colors = ['#fb923c', '#fdba74', '#fed7aa', '#fef3c7', '#fde68a', '#fcd34d', '#fbbf24', '#f59e0b', '#d97706', '#b45309'];
+		let ci = 0;
+		for (const id of $claimedComplexes) {
+			const info = launchComplexCosts[id];
+			if (info) {
+				items.push({ name: info.name, costB: info.costM / 1000, color: colors[ci % colors.length] });
+				ci++;
+			}
+		}
+		return items;
+	});
+
+	let launchInfraDemandB = $derived(
+		claimedLaunchCosts.reduce((sum, c) => sum + c.costB, 0)
+	);
+
+	// Material demands grouped by spending category index
+	let materialDemandsByCategory = $derived.by(() => {
+		const map = new Map<number, CostDemandItem[]>();
+		for (let i = 0; i < materialDefs.length; i++) {
+			const m = materialDefs[i];
+			const costB = matCostBFn(i, $materialAllocations[i]);
+			if (costB <= 0) continue;
+			const catIdx = m.spendingCategoryIndex;
+			if (!map.has(catIdx)) map.set(catIdx, []);
+			map.get(catIdx)!.push({ name: m.name, costB, color: m.color });
+		}
+		return map;
+	});
+
+	// Cost demand per category (in $B). Index 0 = Launch Infrastructure.
+	function getCostDemandB(catIndex: number): number {
+		if (catIndex === 0) return launchInfraDemandB;
+		const matItems = materialDemandsByCategory.get(catIndex);
+		if (matItems) return matItems.reduce((s, it) => s + it.costB, 0);
+		return 0;
+	}
+
+	// ── Detail modal state ──
+	let detailModalIndex = $state<number | null>(null);
+	let detailCat = $derived(detailModalIndex !== null ? categories[detailModalIndex] : null);
+	let detailDemand = $derived(detailModalIndex !== null ? getCostDemandB(detailModalIndex) : 0);
+
+	// Detail pie slices for modal
+	const DETAIL_R = 70;
+	const DETAIL_CX = 80;
+	const DETAIL_CY = 80;
+
+	interface DetailSlice {
+		label: string;
+		value: number;
+		color: string;
+		path: string;
+	}
+
+	let detailPieSlices = $derived.by(() => {
+		if (detailModalIndex === null || !detailCat) return [];
+		const allocated = detailCat.allocated;
+		if (allocated <= 0) return [];
+
+		const slices: DetailSlice[] = [];
+		let cumAngle = -Math.PI / 2;
+
+		// Add individual demand items
+		const items: CostDemandItem[] = [];
+		if (detailModalIndex === 0) items.push(...claimedLaunchCosts);
+		const matItems = materialDemandsByCategory.get(detailModalIndex);
+		if (matItems) items.push(...matItems);
+		const totalDemand = items.reduce((s, it) => s + it.costB, 0);
+
+		for (const item of items) {
+			const pct = item.costB / allocated;
+			if (pct <= 0) continue;
+			const angle = Math.min(pct, 1) * 2 * Math.PI;
+			const start = cumAngle;
+			const end = cumAngle + angle;
+			const x1 = DETAIL_CX + DETAIL_R * Math.cos(start);
+			const y1 = DETAIL_CY + DETAIL_R * Math.sin(start);
+			const x2 = DETAIL_CX + DETAIL_R * Math.cos(end);
+			const y2 = DETAIL_CY + DETAIL_R * Math.sin(end);
+			const large = angle > Math.PI ? 1 : 0;
+			slices.push({
+				label: item.name,
+				value: item.costB,
+				color: item.color,
+				path: `M${DETAIL_CX},${DETAIL_CY} L${x1},${y1} A${DETAIL_R},${DETAIL_R} 0 ${large} 1 ${x2},${y2} Z`,
+			});
+			cumAngle = end;
+		}
+
+		// Unallocated remainder
+		const unalloc = allocated - totalDemand;
+		if (unalloc > 0.001) {
+			const pct = unalloc / allocated;
+			const angle = pct * 2 * Math.PI;
+			const start = cumAngle;
+			const end = cumAngle + angle;
+			const x1 = DETAIL_CX + DETAIL_R * Math.cos(start);
+			const y1 = DETAIL_CY + DETAIL_R * Math.sin(start);
+			const x2 = DETAIL_CX + DETAIL_R * Math.cos(end);
+			const y2 = DETAIL_CY + DETAIL_R * Math.sin(end);
+			const large = angle > Math.PI ? 1 : 0;
+			slices.push({
+				label: 'Unallocated',
+				value: unalloc,
+				color: '#334155',
+				path: `M${DETAIL_CX},${DETAIL_CY} L${x1},${y1} A${DETAIL_R},${DETAIL_R} 0 ${large} 1 ${x2},${y2} Z`,
+			});
+		}
+
+		return slices;
+	});
 
 	function setAllocated(index: number, value: number) {
 		const clamped = Math.max(0, Math.round(value));
 		const othersTotal = totalAllocated - categories[index].allocated;
 		const maxAllowed = annualBudget - othersTotal;
-		categories[index].allocated = Math.min(clamped, maxAllowed);
+		spendingAllocations.update(arr => {
+			const next = [...arr];
+			next[index] = Math.min(clamped, maxAllowed);
+			return next;
+		});
 	}
 
 	function handleInput(index: number, e: Event) {
@@ -224,11 +353,18 @@
 
 	<div class="spend-grid">
 		{#each categories as cat, i}
-			<div class="spend-card">
+			{@const demandB = getCostDemandB(i)}
+			<div class="spend-card" class:has-demand={demandB > 0}>
 				<div class="spend-top">
 					<span class="spend-icon">{cat.icon}</span>
 					<div class="spend-info">
-						<span class="spend-name">{cat.name}</span>
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<span class="spend-name spend-name-clickable" onclick={() => detailModalIndex = i} style="color: {cat.color}">
+							{cat.name}
+							{#if demandB > 0}
+								<span class="demand-badge">${demandB.toFixed(1)}B committed</span>
+							{/if}
+						</span>
 						<span class="spend-desc">{cat.description}</span>
 					</div>
 					<div class="spend-input-wrap">
@@ -252,6 +388,10 @@
 					onpointerup={endDrag}
 					onpointercancel={endDrag}
 				>
+					<!-- Shadow demand bar (striped, behind the slider fill) -->
+					{#if demandB > 0}
+						<div class="spend-bar-demand" style="width: {Math.min(100, (demandB / annualBudget) * 100)}%; --demand-color: {cat.color}"></div>
+					{/if}
 					<div class="spend-bar-fill" style="width: {(cat.allocated / annualBudget) * 100}%; background: {cat.color}"></div>
 					<div class="spend-bar-thumb" style="left: {(cat.allocated / annualBudget) * 100}%; background: {cat.color}"></div>
 				</div>
@@ -270,6 +410,63 @@
 			<li>Propellant production scales with refinery investment</li>
 		</ul>
 	</div>
+
+	<!-- Detail Modal -->
+	{#if detailModalIndex !== null && detailCat}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="detail-overlay" onclick={() => detailModalIndex = null}>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="detail-modal" onclick={(e) => e.stopPropagation()}>
+				<div class="detail-header">
+					<span class="detail-icon">{detailCat.icon}</span>
+					<span class="detail-title" style="color: {detailCat.color}">{detailCat.name}</span>
+					<button class="detail-close" onclick={() => detailModalIndex = null}>✕</button>
+				</div>
+				<div class="detail-body">
+					<div class="detail-pie-section">
+						<svg viewBox="0 0 160 160" class="detail-pie-svg">
+							{#each detailPieSlices as slice}
+								<path d={slice.path} fill={slice.color} stroke="var(--color-bg)" stroke-width="1" />
+							{/each}
+							<circle cx={DETAIL_CX} cy={DETAIL_CY} r="30" fill="var(--color-bg-panel)" />
+							<text x={DETAIL_CX} y={DETAIL_CY - 4} text-anchor="middle" fill="var(--color-text)" font-size="10" font-weight="700">${detailCat.allocated}B</text>
+							<text x={DETAIL_CX} y={DETAIL_CY + 8} text-anchor="middle" fill="var(--color-text-dim)" font-size="6">allocated</text>
+						</svg>
+						<div class="detail-legend">
+							{#each detailPieSlices as slice}
+								<div class="detail-legend-row">
+									<span class="detail-legend-swatch" style="background: {slice.color}"></span>
+									<span class="detail-legend-name">{slice.label}</span>
+									<span class="detail-legend-val">${slice.value.toFixed(2)}B</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+					<div class="detail-summary">
+						<div class="detail-sum-row">
+							<span class="detail-sum-label">Budget Allocated</span>
+							<span class="detail-sum-val" style="color: {detailCat.color}">${detailCat.allocated}B</span>
+						</div>
+						<div class="detail-sum-row">
+							<span class="detail-sum-label">Cost Demand</span>
+							<span class="detail-sum-val" style="color: {detailDemand > detailCat.allocated ? '#ef4444' : '#fbbf24'}">${detailDemand.toFixed(2)}B</span>
+						</div>
+						<div class="detail-sum-row">
+							<span class="detail-sum-label">Coverage</span>
+							<span class="detail-sum-val" style="color: {detailDemand <= detailCat.allocated ? '#4ade80' : '#ef4444'}">
+								{detailCat.allocated > 0 ? Math.min(100, (detailDemand / detailCat.allocated * 100)).toFixed(0) : 0}%
+							</span>
+						</div>
+						{#if detailDemand > detailCat.allocated}
+							<div class="detail-warning">
+								⚠ Shortfall of ${(detailDemand - detailCat.allocated).toFixed(2)}B — will draw from unallocated budget or reserves
+							</div>
+						{/if}
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -519,9 +716,26 @@
 	}
 
 	.spend-icon { font-size: 1.1rem; flex-shrink: 0; }
-	.spend-info { display: flex; flex-direction: column; }
-	.spend-name { font-size: 0.8rem; font-weight: 600; }
+	.spend-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+	.spend-name { font-size: 0.8rem; font-weight: 600; display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+	.spend-name-clickable { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+	.spend-name-clickable:hover { text-decoration-style: solid; filter: brightness(1.2); }
 	.spend-desc { font-size: 0.65rem; color: var(--color-text-dim); }
+
+	.demand-badge {
+		font-size: 0.5rem;
+		padding: 0.05rem 0.3rem;
+		border-radius: 0.2rem;
+		background: rgba(251, 191, 36, 0.15);
+		color: #fbbf24;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		white-space: nowrap;
+	}
+
+	.spend-card.has-demand {
+		border-color: rgba(251, 191, 36, 0.25);
+	}
 
 	.spend-input-wrap {
 		display: flex;
@@ -580,11 +794,30 @@
 		user-select: none;
 	}
 
+	.spend-bar-demand {
+		position: absolute;
+		top: 0;
+		left: 0;
+		height: 100%;
+		border-radius: 4px;
+		pointer-events: none;
+		background: repeating-linear-gradient(
+			-45deg,
+			transparent,
+			transparent 3px,
+			color-mix(in srgb, var(--demand-color) 25%, transparent) 3px,
+			color-mix(in srgb, var(--demand-color) 25%, transparent) 6px
+		);
+		z-index: 0;
+	}
+
 	.spend-bar-fill {
+		position: relative;
 		height: 100%;
 		border-radius: 4px;
 		transition: width 0.05s;
 		pointer-events: none;
+		z-index: 1;
 	}
 
 	.spend-bar-thumb {
@@ -597,6 +830,142 @@
 		box-shadow: 0 0 4px rgba(0,0,0,0.4);
 		pointer-events: none;
 		transition: left 0.05s;
+		z-index: 2;
+	}
+
+	/* Detail modal */
+	.detail-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.6);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+	}
+
+	.detail-modal {
+		background: var(--color-bg-card, #1a2234);
+		border: 1px solid var(--color-border);
+		border-radius: 0.75rem;
+		width: 480px;
+		max-width: 90vw;
+		max-height: 85vh;
+		overflow-y: auto;
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+	}
+
+	.detail-header {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.75rem 1rem;
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.detail-icon { font-size: 1.2rem; }
+	.detail-title { font-size: 1rem; font-weight: 700; flex: 1; }
+
+	.detail-close {
+		background: transparent;
+		border: none;
+		color: var(--color-text-dim);
+		font-size: 1rem;
+		cursor: pointer;
+		padding: 0.2rem 0.4rem;
+		border-radius: 0.25rem;
+	}
+	.detail-close:hover { background: var(--color-border); color: var(--color-text); }
+
+	.detail-body {
+		padding: 1rem;
+		display: flex;
+		gap: 1.25rem;
+	}
+
+	.detail-pie-section {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		min-width: 170px;
+	}
+
+	.detail-pie-svg {
+		width: 160px;
+		height: 160px;
+		margin-bottom: 0.5rem;
+	}
+
+	.detail-legend {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		width: 100%;
+	}
+
+	.detail-legend-row {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		font-size: 0.6rem;
+	}
+
+	.detail-legend-swatch {
+		width: 8px;
+		height: 8px;
+		border-radius: 2px;
+		flex-shrink: 0;
+	}
+
+	.detail-legend-name {
+		flex: 1;
+		color: var(--color-text-dim);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.detail-legend-val {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.6rem;
+		color: var(--color-text);
+		flex-shrink: 0;
+	}
+
+	.detail-summary {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding-top: 0.5rem;
+	}
+
+	.detail-sum-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+	}
+
+	.detail-sum-label {
+		font-size: 0.75rem;
+		color: var(--color-text-dim);
+	}
+
+	.detail-sum-val {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.9rem;
+		font-weight: 700;
+	}
+
+	.detail-warning {
+		margin-top: 0.5rem;
+		padding: 0.4rem 0.5rem;
+		border-radius: 0.3rem;
+		background: rgba(239, 68, 68, 0.1);
+		border: 1px solid rgba(239, 68, 68, 0.3);
+		color: #fca5a5;
+		font-size: 0.65rem;
+		line-height: 1.4;
 	}
 
 	.constraints-box {

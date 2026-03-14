@@ -101,178 +101,251 @@
 		}
 	}
 
-	// --- Polar projection math ---
-	function polarProject(lat: number, lng: number, isNorth: boolean, cx: number, cy: number, radius: number) {
-		const DEG = Math.PI / 180;
-		const r = isNorth
-			? ((90 - lat) / 90) * radius
-			: ((90 + lat) / 90) * radius;
-		const theta = lng * DEG;
-		const x = isNorth
-			? cx + r * Math.sin(theta)
-			: cx + r * Math.sin(theta);
-		const y = isNorth
-			? cy - r * Math.cos(theta)
-			: cy + r * Math.cos(theta);
-		return { x, y, r };
-	}
-
-	// --- Canvas polar rendering ---
+	// --- Canvas polar rendering with zoom ---
 	let northCanvas: HTMLCanvasElement;
 	let southCanvas: HTMLCanvasElement;
 	let polarWrap: HTMLDivElement;
 
+	// Zoom state: latSpan = degrees of latitude visible from pole to edge of circle
+	// At min zoom (90°) you see the whole hemisphere; at max zoom (5°) you see only near the pole
+	let northLatSpan = $state(90);
+	let southLatSpan = $state(90);
+	const MIN_LAT_SPAN = 5;
+	const MAX_LAT_SPAN = 90;
+	const ZOOM_FACTOR = 0.85; // multiply/divide per wheel tick
+
+	// Tile cache to avoid re-fetching
+	const tileCache = new Map<string, HTMLImageElement>();
+	let renderNorth = 0; // render generation counters to cancel stale renders
+	let renderSouth = 0;
+
 	function loadImg(src: string): Promise<HTMLImageElement> {
+		if (tileCache.has(src)) return Promise.resolve(tileCache.get(src)!);
 		return new Promise(res => {
 			const img = new Image();
 			img.crossOrigin = 'anonymous';
-			img.onload = () => res(img);
+			img.onload = () => { tileCache.set(src, img); res(img); };
 			img.onerror = () => res(img);
 			img.src = src;
 		});
 	}
 
-	async function drawPolarMaps() {
-		await tick();
-		if (!northCanvas || !southCanvas || !polarWrap) return;
+	// Determine best tile zoom level for current lat span
+	function pickTileZoom(latSpan: number): number {
+		// At latSpan=90 we need full globe coverage → z=2 is decent (16 cols × 4 rows)
+		// At latSpan=5 we need fine detail → z=5..7
+		// Heuristic: fewer degrees visible → higher zoom
+		if (latSpan > 60) return 2;
+		if (latSpan > 30) return 3;
+		if (latSpan > 15) return 4;
+		if (latSpan > 8) return 5;
+		if (latSpan > 4) return 6;
+		return 7;
+	}
 
-		// Size each circle to fill half the container width (minus gap)
-		const containerW = polarWrap.clientWidth;
-		const size = Math.min(Math.floor((containerW - 40) / 2), 540);
+	// Build equirectangular texture from WMTS tiles covering the needed lat range
+	async function buildTexture(latSpan: number, isNorth: boolean): Promise<{ data: ImageData; w: number; h: number; latMin: number; latMax: number } | null> {
+		const tileZ = pickTileZoom(latSpan);
+		const nCols = Math.pow(2, tileZ) * 2; // EPSG:4326: 2 * 2^z cols
+		const nRows = Math.pow(2, tileZ);       // 2^z rows
+		const tileLatSize = 180 / nRows;
+		const tileLngSize = 360 / nCols;
 
-		for (const canvas of [northCanvas, southCanvas]) {
-			canvas.width = size;
-			canvas.height = size;
-			canvas.style.width = size + 'px';
-			canvas.style.height = size + 'px';
-		}
+		// Lat range we need
+		const poleLat = isNorth ? 90 : -90;
+		const edgeLat = isNorth ? 90 - latSpan : -90 + latSpan;
+		const latMin = Math.min(poleLat, edgeLat);
+		const latMax = Math.max(poleLat, edgeLat);
 
-		// Load zoom-1 tiles (2×1 grid per hemisphere = 4 tiles total) for better resolution
+		// Which tile rows cover this range? Row 0 = top = +90
+		const rowStart = Math.max(0, Math.floor((90 - latMax) / tileLatSize));
+		const rowEnd = Math.min(nRows - 1, Math.floor((90 - latMin) / tileLatSize));
+		const rowCount = rowEnd - rowStart + 1;
+
+		// Load all columns for those rows
 		const base = 'https://trek.nasa.gov/tiles/Moon/EQ/LRO_WAC_Mosaic_Global_303ppd/1.0.0/default/default028mm';
-		const tiles = await Promise.all([
-			loadImg(`${base}/1/0/0.jpg`), // top-left
-			loadImg(`${base}/1/0/1.jpg`), // top-right
-			loadImg(`${base}/1/0/2.jpg`), // top-right2 (EPSG:4326 z1 = 4 cols × 2 rows)
-			loadImg(`${base}/1/0/3.jpg`), // top-right3
-			loadImg(`${base}/1/1/0.jpg`), // bottom-left
-			loadImg(`${base}/1/1/1.jpg`), // bottom-right
-			loadImg(`${base}/1/1/2.jpg`),
-			loadImg(`${base}/1/1/3.jpg`),
-		]);
+		const promises: Promise<{ img: HTMLImageElement; col: number; row: number }>[] = [];
+		for (let r = rowStart; r <= rowEnd; r++) {
+			for (let c = 0; c < nCols; c++) {
+				promises.push(loadImg(`${base}/${tileZ}/${r}/${c}.jpg`).then(img => ({ img, col: c, row: r })));
+			}
+		}
+		const results = await Promise.all(promises);
 
-		// Build equirectangular texture from tiles (4 cols × 2 rows)
-		const tw = tiles[0].naturalWidth || 256;
-		const texW = tw * 4, texH = tw * 2;
+		const tw = 256; // tile pixel size
+		const texW = nCols * tw;
+		const texH = rowCount * tw;
 		const texCanvas = document.createElement('canvas');
 		texCanvas.width = texW;
 		texCanvas.height = texH;
 		const texCtx = texCanvas.getContext('2d')!;
-		// Row 0 (top = north)
-		for (let c = 0; c < 4; c++) {
-			if (tiles[c].naturalWidth) texCtx.drawImage(tiles[c], c * tw, 0, tw, tw);
-		}
-		// Row 1 (bottom = south)
-		for (let c = 0; c < 4; c++) {
-			if (tiles[4 + c].naturalWidth) texCtx.drawImage(tiles[4 + c], c * tw, tw, tw, tw);
-		}
-		const texData = texCtx.getImageData(0, 0, texW, texH);
-
-		const cx = size / 2, cy = size / 2, radius = size / 2 - 6;
-
-		for (const [canvas, isNorth] of [[northCanvas, true], [southCanvas, false]] as [HTMLCanvasElement, boolean][]) {
-			const ctx = canvas.getContext('2d')!;
-
-			// Render projected texture pixel by pixel at 1:1 canvas resolution
-			const imgOut = ctx.createImageData(size, size);
-			for (let py = 0; py < size; py++) {
-				for (let px = 0; px < size; px++) {
-					const dx = px - cx, dy = py - cy;
-					const dist = Math.sqrt(dx * dx + dy * dy);
-					if (dist > radius) continue;
-
-					const lat = isNorth
-						? 90 - (dist / radius) * 90
-						: -90 + (dist / radius) * 90;
-					const lng = isNorth
-						? Math.atan2(dx, -dy) * (180 / Math.PI)
-						: Math.atan2(dx, dy) * (180 / Math.PI);
-
-					const tx = ((Math.floor(((lng + 180) / 360) * texW) % texW) + texW) % texW;
-					const ty = Math.min(Math.floor(((90 - lat) / 180) * texH), texH - 1);
-					const ti = (ty * texW + tx) * 4;
-					const oi = (py * size + px) * 4;
-					imgOut.data[oi] = texData.data[ti];
-					imgOut.data[oi + 1] = texData.data[ti + 1];
-					imgOut.data[oi + 2] = texData.data[ti + 2];
-					imgOut.data[oi + 3] = 255;
-				}
+		for (const { img, col, row } of results) {
+			if (img.naturalWidth) {
+				texCtx.drawImage(img, col * tw, (row - rowStart) * tw, tw, tw);
 			}
-			ctx.putImageData(imgOut, 0, 0);
+		}
 
-			// Circle border
-			ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-			ctx.lineWidth = 1.5;
+		const texLatMax = 90 - rowStart * tileLatSize;
+		const texLatMin = 90 - (rowEnd + 1) * tileLatSize;
+
+		return {
+			data: texCtx.getImageData(0, 0, texW, texH),
+			w: texW,
+			h: texH,
+			latMin: texLatMin,
+			latMax: texLatMax,
+		};
+	}
+
+	function polarProject(lat: number, lng: number, isNorth: boolean, cx: number, cy: number, radius: number, latSpan: number) {
+		const colatDeg = isNorth ? (90 - lat) : (90 + lat);
+		const r = (colatDeg / latSpan) * radius;
+		const theta = (lng * Math.PI) / 180;
+		const x = isNorth ? cx + r * Math.sin(theta) : cx + r * Math.sin(theta);
+		const y = isNorth ? cy - r * Math.cos(theta) : cy + r * Math.cos(theta);
+		return { x, y, r };
+	}
+
+	async function drawPolar(canvas: HTMLCanvasElement, isNorth: boolean, latSpan: number, gen: number) {
+		if (!canvas || !polarWrap) return;
+
+		const containerW = polarWrap.clientWidth;
+		const size = Math.min(Math.floor((containerW - 40) / 2), 580);
+		canvas.width = size;
+		canvas.height = size;
+		canvas.style.width = size + 'px';
+		canvas.style.height = size + 'px';
+
+		const tex = await buildTexture(latSpan, isNorth);
+		// Check if this render is still current
+		if (isNorth && gen !== renderNorth) return;
+		if (!isNorth && gen !== renderSouth) return;
+		if (!tex) return;
+
+		const cx = size / 2, cy = size / 2, radius = size / 2 - 4;
+		const ctx = canvas.getContext('2d')!;
+
+		// Pixel-by-pixel azimuthal projection
+		const imgOut = ctx.createImageData(size, size);
+		for (let py = 0; py < size; py++) {
+			for (let px = 0; px < size; px++) {
+				const dx = px - cx, dy = py - cy;
+				const dist = Math.sqrt(dx * dx + dy * dy);
+				if (dist > radius) continue;
+
+				// Colatitude in degrees from pole (0 = pole, latSpan = edge)
+				const colatDeg = (dist / radius) * latSpan;
+				const lat = isNorth ? 90 - colatDeg : -90 + colatDeg;
+				const lng = isNorth
+					? Math.atan2(dx, -dy) * (180 / Math.PI)
+					: Math.atan2(dx, dy) * (180 / Math.PI);
+
+				// Map to texture coords
+				const tyFrac = (tex.latMax - lat) / (tex.latMax - tex.latMin);
+				const txFrac = ((lng + 180) / 360);
+				const txPx = ((Math.floor(txFrac * tex.w) % tex.w) + tex.w) % tex.w;
+				const tyPx = Math.min(Math.max(Math.floor(tyFrac * tex.h), 0), tex.h - 1);
+				const ti = (tyPx * tex.w + txPx) * 4;
+				const oi = (py * size + px) * 4;
+				imgOut.data[oi] = tex.data.data[ti];
+				imgOut.data[oi + 1] = tex.data.data[ti + 1];
+				imgOut.data[oi + 2] = tex.data.data[ti + 2];
+				imgOut.data[oi + 3] = 255;
+			}
+		}
+		ctx.putImageData(imgOut, 0, 0);
+
+		// Circle border
+		ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+		ctx.lineWidth = 1.5;
+		ctx.beginPath();
+		ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+		ctx.stroke();
+
+		// Grid: latitude circles
+		ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+		ctx.lineWidth = 0.5;
+		const latStep = latSpan > 30 ? 30 : latSpan > 10 ? 10 : 5;
+		for (let d = latStep; d < latSpan; d += latStep) {
+			const gridR = (d / latSpan) * radius;
 			ctx.beginPath();
-			ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+			ctx.arc(cx, cy, gridR, 0, Math.PI * 2);
 			ctx.stroke();
 
-			// Grid lines: latitude circles at 30° intervals
-			ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-			ctx.lineWidth = 0.5;
-			for (const latLine of [30, 60]) {
-				const gridR = (latLine / 90) * radius;
-				ctx.beginPath();
-				ctx.arc(cx, cy, gridR, 0, Math.PI * 2);
-				ctx.stroke();
-			}
-
-			// Longitude lines every 45°
-			for (let deg = 0; deg < 360; deg += 45) {
-				const rad = (deg * Math.PI) / 180;
-				ctx.beginPath();
-				ctx.moveTo(cx, cy);
-				ctx.lineTo(cx + radius * Math.sin(rad), cy - radius * Math.cos(rad));
-				ctx.stroke();
-			}
-
-			// Plot sites
-			for (const site of lunarSites) {
-				// Only show sites in the relevant hemisphere (with overlap at equator)
-				if (isNorth && site.lat < -10) continue;
-				if (!isNorth && site.lat > 10) continue;
-
-				const pos = polarProject(site.lat, site.lng, isNorth, cx, cy, radius);
-				if (pos.r > radius) continue;
-
-				const color = siteColors[site.type];
-				// Glow
-				ctx.shadowColor = color;
-				ctx.shadowBlur = 8;
-				ctx.fillStyle = color;
-				ctx.beginPath();
-				ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
-				ctx.fill();
-				ctx.shadowBlur = 0;
-
-				// Ring
-				ctx.strokeStyle = color;
-				ctx.lineWidth = 1.5;
-				ctx.beginPath();
-				ctx.arc(pos.x, pos.y, 9, 0, Math.PI * 2);
-				ctx.stroke();
-
-				// Label
-				ctx.fillStyle = '#e2e8f0';
-				ctx.font = '9px sans-serif';
-				ctx.textAlign = 'left';
-				ctx.fillText(site.name, pos.x + 13, pos.y + 3);
-			}
-
-			// Pole label
-			ctx.fillStyle = 'rgba(255,255,255,0.5)';
-			ctx.font = 'bold 11px sans-serif';
+			// Label
+			const labelLat = isNorth ? 90 - d : -90 + d;
+			ctx.fillStyle = 'rgba(255,255,255,0.25)';
+			ctx.font = '9px sans-serif';
 			ctx.textAlign = 'center';
-			ctx.fillText(isNorth ? 'N' : 'S', cx, cy + 4);
+			ctx.fillText(`${labelLat.toFixed(0)}°`, cx, cy - gridR + 11);
+		}
+
+		// Longitude lines every 45°
+		for (let deg = 0; deg < 360; deg += 45) {
+			const rad = (deg * Math.PI) / 180;
+			ctx.beginPath();
+			ctx.moveTo(cx, cy);
+			ctx.lineTo(cx + radius * Math.sin(rad), cy - radius * Math.cos(rad));
+			ctx.stroke();
+		}
+
+		// Plot sites
+		for (const site of lunarSites) {
+			const colatSite = isNorth ? (90 - site.lat) : (90 + site.lat);
+			if (colatSite < 0 || colatSite > latSpan) continue; // outside visible range
+
+			const pos = polarProject(site.lat, site.lng, isNorth, cx, cy, radius, latSpan);
+
+			const color = siteColors[site.type];
+			ctx.shadowColor = color;
+			ctx.shadowBlur = 8;
+			ctx.fillStyle = color;
+			ctx.beginPath();
+			ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.shadowBlur = 0;
+
+			ctx.strokeStyle = color;
+			ctx.lineWidth = 1.5;
+			ctx.beginPath();
+			ctx.arc(pos.x, pos.y, 9, 0, Math.PI * 2);
+			ctx.stroke();
+
+			ctx.fillStyle = '#e2e8f0';
+			ctx.font = '10px sans-serif';
+			ctx.textAlign = 'left';
+			ctx.fillText(site.name, pos.x + 13, pos.y + 3);
+		}
+
+		// Pole label
+		ctx.fillStyle = 'rgba(255,255,255,0.5)';
+		ctx.font = 'bold 11px sans-serif';
+		ctx.textAlign = 'center';
+		ctx.fillText(isNorth ? 'N' : 'S', cx, cy + 4);
+	}
+
+	async function drawPolarMaps() {
+		await tick();
+		renderNorth++;
+		renderSouth++;
+		await Promise.all([
+			drawPolar(northCanvas, true, northLatSpan, renderNorth),
+			drawPolar(southCanvas, false, southLatSpan, renderSouth),
+		]);
+	}
+
+	function handlePolarWheel(e: WheelEvent, isNorth: boolean) {
+		e.preventDefault();
+		if (isNorth) {
+			if (e.deltaY < 0) northLatSpan = Math.max(MIN_LAT_SPAN, northLatSpan * ZOOM_FACTOR);
+			else northLatSpan = Math.min(MAX_LAT_SPAN, northLatSpan / ZOOM_FACTOR);
+			renderNorth++;
+			drawPolar(northCanvas, true, northLatSpan, renderNorth);
+		} else {
+			if (e.deltaY < 0) southLatSpan = Math.max(MIN_LAT_SPAN, southLatSpan * ZOOM_FACTOR);
+			else southLatSpan = Math.min(MAX_LAT_SPAN, southLatSpan / ZOOM_FACTOR);
+			renderSouth++;
+			drawPolar(southCanvas, false, southLatSpan, renderSouth);
 		}
 	}
 
@@ -308,11 +381,15 @@
 		<div class="polar-container" bind:this={polarWrap}>
 			<div class="polar-col">
 				<span class="polar-label">North Pole</span>
-				<canvas bind:this={northCanvas} class="polar-canvas"></canvas>
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<canvas bind:this={northCanvas} class="polar-canvas" onwheel={(e) => handlePolarWheel(e, true)}></canvas>
+				<span class="zoom-indicator">{northLatSpan.toFixed(0)}° from pole</span>
 			</div>
 			<div class="polar-col">
 				<span class="polar-label">South Pole</span>
-				<canvas bind:this={southCanvas} class="polar-canvas"></canvas>
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<canvas bind:this={southCanvas} class="polar-canvas" onwheel={(e) => handlePolarWheel(e, false)}></canvas>
+				<span class="zoom-indicator">{southLatSpan.toFixed(0)}° from pole</span>
 			</div>
 		</div>
 	{:else}
@@ -429,6 +506,14 @@
 		background: #0a0a0f;
 		max-width: 100%;
 		height: auto;
+		cursor: zoom-in;
+	}
+
+	.zoom-indicator {
+		font-size: 0.65rem;
+		color: var(--color-text-dim);
+		opacity: 0.6;
+		font-family: monospace;
 	}
 
 	.spherical-placeholder {

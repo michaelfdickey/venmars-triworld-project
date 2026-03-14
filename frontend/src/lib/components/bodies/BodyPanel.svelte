@@ -3,6 +3,7 @@
 	import AtmosphereTab from './subtabs/AtmosphereTab.svelte';
 	import MapTab from './subtabs/MapTab.svelte';
 	import ProductionTab from './subtabs/ProductionTab.svelte';
+	import ConsumptionTab from './subtabs/ConsumptionTab.svelte';
 	import RocketsTab from './subtabs/RocketsTab.svelte';
 	import PayloadsTab from './subtabs/PayloadsTab.svelte';
 	import MissionsTab from './subtabs/MissionsTab.svelte';
@@ -20,6 +21,7 @@
 		{ id: 'map', label: 'Planetary Map' },
 		{ id: 'spending', label: 'Spending', earthOnly: true },
 		{ id: 'production', label: 'Production' },
+		{ id: 'consumption', label: 'Consumption' },
 		{ id: 'rockets', label: 'Rockets' },
 		{ id: 'payloads', label: 'Payloads' },
 		{ id: 'missions', label: 'Missions' },
@@ -91,6 +93,8 @@
 			<SpendingTab {bodyId} />
 		{:else if activeSubTab === 'production'}
 			<ProductionTab {bodyId} />
+		{:else if activeSubTab === 'consumption'}
+			<ConsumptionTab {bodyId} />
 		{:else if activeSubTab === 'rockets'}
 			<RocketsTab {bodyId} />
 		{:else if activeSubTab === 'payloads'}

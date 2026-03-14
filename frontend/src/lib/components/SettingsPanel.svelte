@@ -1,11 +1,45 @@
 <script lang="ts">
-	import { gameScreen } from '$lib/stores/gameStore';
+	import { gameScreen, difficulty, difficultyConfig } from '$lib/stores/gameStore';
+	import type { Difficulty } from '$lib/stores/gameStore';
+
+	const difficulties: Difficulty[] = ['easy', 'medium', 'hard'];
+	const diffColors: Record<Difficulty, string> = {
+		easy: '#4ade80',
+		medium: '#fbbf24',
+		hard: '#ef4444',
+	};
 </script>
 
 <div>
 	<h3 class="text-lg font-semibold mb-6">Settings</h3>
 
 	<div class="space-y-6 max-w-lg">
+		<!-- Difficulty -->
+		<div class="bg-[var(--color-bg-card)] rounded-lg p-4 border border-[var(--color-border)]">
+			<h4 class="text-sm font-medium mb-3">Difficulty</h4>
+			<div class="space-y-3">
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-[var(--color-text-dim)]">Budget Level</span>
+					<div class="flex gap-2">
+						{#each difficulties as diff}
+							<button
+								onclick={() => difficulty.set(diff)}
+								class="px-3 py-1 rounded text-xs font-bold transition-all cursor-pointer border"
+								style="border-color: {diffColors[diff]}; color: {diffColors[diff]}; background: {$difficulty === diff ? diffColors[diff] + '22' : 'transparent'}; opacity: {$difficulty === diff ? 1 : 0.5}"
+							>
+								{difficultyConfig[diff].label}
+							</button>
+						{/each}
+					</div>
+				</div>
+				<div class="text-xs text-[var(--color-text-dim)] space-y-1">
+					<p>Max {difficultyConfig[$difficulty].gdpPercent}% of global GDP annually ({difficultyConfig[$difficulty].description})</p>
+					<p>Max 10% of common materials global production; aerospace-specific materials uncapped</p>
+					<p>Constraints: industrial throughput, skilled labor, launch infrastructure, propellant production</p>
+				</div>
+			</div>
+		</div>
+
 		<!-- Simulation settings -->
 		<div class="bg-[var(--color-bg-card)] rounded-lg p-4 border border-[var(--color-border)]">
 			<h4 class="text-sm font-medium mb-3">Simulation</h4>

@@ -1,22 +1,30 @@
 <script lang="ts">
-	import { gameScreen, gameState } from '$lib/stores/gameStore';
+	import { gameScreen, gameState, difficulty, difficultyConfig } from '$lib/stores/gameStore';
 	import { apiPost } from '$lib/api/client';
-	import type { GameState } from '$lib/stores/gameStore';
+	import type { GameState, Difficulty } from '$lib/stores/gameStore';
 
 	let loading = $state(false);
+	let selectedDifficulty = $state<Difficulty>('medium');
 
 	async function startGame() {
 		loading = true;
+		difficulty.set(selectedDifficulty);
 		try {
 			const state = await apiPost<GameState>('/game/new');
 			gameState.set(state);
 			gameScreen.set('playing');
 		} catch {
-			// Backend not running — start with default state anyway
 			gameScreen.set('playing');
 		}
 		loading = false;
 	}
+
+	const difficulties: Difficulty[] = ['easy', 'medium', 'hard'];
+	const diffColors: Record<Difficulty, string> = {
+		easy: '#4ade80',
+		medium: '#fbbf24',
+		hard: '#ef4444',
+	};
 </script>
 
 <div class="flex flex-col items-center justify-center min-h-screen relative overflow-hidden">
@@ -76,6 +84,27 @@
 		<p class="text-[var(--color-text-dim)] mt-4 max-w-lg mx-auto text-sm leading-relaxed">
 			Strip Venus' atmosphere. Thicken Mars'. Engineer two new habitable worlds.
 		</p>
+	</div>
+
+	<!-- Difficulty selector -->
+	<div class="relative z-10 mb-8">
+		<p class="text-xs text-[var(--color-text-dim)] mb-3 text-center uppercase tracking-widest">Budget Difficulty</p>
+		<div class="flex gap-3">
+			{#each difficulties as diff}
+				<button
+					onclick={() => selectedDifficulty = diff}
+					class="px-6 py-3 rounded-lg border-2 transition-all duration-200 cursor-pointer
+						{selectedDifficulty === diff ? 'scale-105' : 'opacity-60 hover:opacity-80'}"
+					style="border-color: {diffColors[diff]}; background: {selectedDifficulty === diff ? diffColors[diff] + '22' : 'transparent'};"
+				>
+					<span class="block text-sm font-bold" style="color: {diffColors[diff]}">{difficultyConfig[diff].label}</span>
+					<span class="block text-xs mt-1" style="color: {diffColors[diff]}; opacity: 0.8">{difficultyConfig[diff].gdpPercent}% GDP</span>
+					<span class="block text-[0.65rem] mt-0.5 text-[var(--color-text-dim)]">
+						~${difficultyConfig[diff].annualBudgetB >= 1000 ? (difficultyConfig[diff].annualBudgetB / 1000).toFixed(1) + 'T' : difficultyConfig[diff].annualBudgetB + 'B'}/yr
+					</span>
+				</button>
+			{/each}
+		</div>
 	</div>
 
 	<!-- Start button -->

@@ -1,6 +1,20 @@
 import { writable } from 'svelte/store';
 
 export type GameScreen = 'title' | 'playing';
+export type Difficulty = 'easy' | 'medium' | 'hard';
+
+export const difficulty = writable<Difficulty>('medium');
+
+export const difficultyConfig: Record<Difficulty, {
+	label: string;
+	gdpPercent: number;
+	annualBudgetB: number;
+	description: string;
+}> = {
+	easy:   { label: 'Easy',   gdpPercent: 2.0, annualBudgetB: 2120, description: '2% of global GDP (~$2.1T/yr)' },
+	medium: { label: 'Medium', gdpPercent: 1.0, annualBudgetB: 1060, description: '1% of global GDP (~$1.06T/yr)' },
+	hard:   { label: 'Hard',   gdpPercent: 0.5, annualBudgetB: 530,  description: '0.5% of global GDP (~$530B/yr)' },
+};
 
 export const gameScreen = writable<GameScreen>('title');
 

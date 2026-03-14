@@ -8,6 +8,7 @@
 	import MissionsTab from './subtabs/MissionsTab.svelte';
 	import LaunchTab from './subtabs/LaunchTab.svelte';
 	import PopulationTab from './subtabs/PopulationTab.svelte';
+	import SpendingTab from './subtabs/SpendingTab.svelte';
 	import VenusAltitudeSelector from './VenusAltitudeSelector.svelte';
 
 	let { bodyId }: { bodyId: string } = $props();
@@ -17,6 +18,7 @@
 	const subTabs = [
 		{ id: 'atmosphere', label: 'Atmosphere' },
 		{ id: 'map', label: 'Planetary Map' },
+		{ id: 'spending', label: 'Spending', earthOnly: true },
 		{ id: 'production', label: 'Production' },
 		{ id: 'rockets', label: 'Rockets' },
 		{ id: 'payloads', label: 'Payloads' },
@@ -24,6 +26,10 @@
 		{ id: 'launch', label: 'Payload to Orbit' },
 		{ id: 'population', label: 'Population' }
 	];
+
+	let visibleTabs = $derived(
+		subTabs.filter(t => !t.earthOnly || bodyId === 'earth')
+	);
 
 	let body = $derived<BodyState | null>(() => {
 		const s = $gameState;
@@ -62,7 +68,7 @@
 
 	<!-- Sub-tabs -->
 	<div class="flex gap-1 mb-4 border-b border-[var(--color-border)]">
-		{#each subTabs as tab}
+		{#each visibleTabs as tab}
 			<button
 				onclick={() => activeSubTab = tab.id}
 				class="px-4 py-2 text-xs font-medium rounded-t transition-all cursor-pointer
@@ -81,6 +87,8 @@
 			<AtmosphereTab {bodyId} altitude={bodyId === 'venus' ? selectedAltitude : 0} />
 		{:else if activeSubTab === 'map'}
 			<MapTab {bodyId} />
+		{:else if activeSubTab === 'spending'}
+			<SpendingTab {bodyId} />
 		{:else if activeSubTab === 'production'}
 			<ProductionTab {bodyId} />
 		{:else if activeSubTab === 'rockets'}

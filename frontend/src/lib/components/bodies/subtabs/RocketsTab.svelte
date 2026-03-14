@@ -8,6 +8,7 @@
 		payloadLEO: number;
 		payloadGTO: number;
 		payloadTLI: number;
+		fairingVolume_m3: number;
 		costPerLaunch: number;
 		reusable: boolean;
 		stages: number;
@@ -64,6 +65,7 @@
 			payloadLEO: 150000,
 			payloadGTO: 21000,
 			payloadTLI: 50000,
+			fairingVolume_m3: 1000,
 			costPerLaunch: 10,
 			reusable: true,
 			stages: 2,
@@ -81,6 +83,7 @@
 			payloadLEO: 63800,
 			payloadGTO: 26700,
 			payloadTLI: 16000,
+			fairingVolume_m3: 145,
 			costPerLaunch: 97,
 			reusable: true,
 			stages: 2,
@@ -98,6 +101,7 @@
 			payloadLEO: 22800,
 			payloadGTO: 8300,
 			payloadTLI: 4020,
+			fairingVolume_m3: 145,
 			costPerLaunch: 67,
 			reusable: true,
 			stages: 2,
@@ -115,6 +119,7 @@
 			payloadLEO: 130000,
 			payloadGTO: 42000,
 			payloadTLI: 46000,
+			fairingVolume_m3: 830,
 			costPerLaunch: 2200,
 			reusable: false,
 			stages: 2,
@@ -132,6 +137,7 @@
 			payloadLEO: 45000,
 			payloadGTO: 13000,
 			payloadTLI: 8000,
+			fairingVolume_m3: 400,
 			costPerLaunch: 68,
 			reusable: true,
 			stages: 2,
@@ -149,6 +155,7 @@
 			payloadLEO: 27200,
 			payloadGTO: 14400,
 			payloadTLI: 7700,
+			fairingVolume_m3: 172,
 			costPerLaunch: 110,
 			reusable: false,
 			stages: 2,
@@ -166,6 +173,7 @@
 			payloadLEO: 150000,
 			payloadGTO: 50000,
 			payloadTLI: 53000,
+			fairingVolume_m3: 900,
 			costPerLaunch: 500,
 			reusable: false,
 			stages: 3,
@@ -183,6 +191,7 @@
 			payloadLEO: 21650,
 			payloadGTO: 11500,
 			payloadTLI: 4500,
+			fairingVolume_m3: 180,
 			costPerLaunch: 115,
 			reusable: false,
 			stages: 2,
@@ -200,6 +209,7 @@
 			payloadLEO: 13000,
 			payloadGTO: 3000,
 			payloadTLI: 1500,
+			fairingVolume_m3: 100,
 			costPerLaunch: 50,
 			reusable: true,
 			stages: 2,
@@ -217,6 +227,7 @@
 			payloadLEO: 33500,
 			payloadGTO: 12000,
 			payloadTLI: 5500,
+			fairingVolume_m3: 160,
 			costPerLaunch: 55,
 			reusable: true,
 			stages: 2,
@@ -331,6 +342,10 @@
 					<div class="spec">
 						<span class="spec-label">TLI</span>
 						<span class="spec-value">{formatMass(rocket.payloadTLI)}</span>
+					</div>
+					<div class="spec">
+						<span class="spec-label">Volume</span>
+						<span class="spec-value">{rocket.fairingVolume_m3} m³</span>
 					</div>
 					<div class="spec">
 						<span class="spec-label">Cost</span>
@@ -535,7 +550,7 @@
 
 	.rocket-specs {
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		grid-template-columns: repeat(5, 1fr);
 		gap: 0.4rem;
 		margin-bottom: 0.5rem;
 	}

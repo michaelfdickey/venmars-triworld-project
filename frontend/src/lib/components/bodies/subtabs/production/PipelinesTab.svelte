@@ -146,8 +146,102 @@
 		},
 	];
 
+	// ── Aluminum Production Chain ──────────────────────────────────────
+	const aluminumChain: StageNode[] = [
+		{
+			id: 'bauxite-mine',
+			name: 'Bauxite Mining',
+			facility: 'Open-Pit Mine',
+			icon: '⛏️',
+			inputs: [
+				{ name: 'Diesel Fuel', tPerDay: 70, type: 'secondary' },
+				{ name: 'Explosives', tPerDay: 4, type: 'secondary' },
+			],
+			outputs: [
+				{ name: 'Bauxite Ore', tPerDay: 20000, type: 'primary' },
+			],
+			laborPerUnit: 600,
+			energyMW: 30,
+			capitalCostM: 3200,
+			color: '#c084fc',
+		},
+		{
+			id: 'alumina-refinery',
+			name: 'Alumina Refining',
+			facility: 'Bayer Process Plant (×2)',
+			icon: '🏭',
+			inputs: [
+				{ name: 'Bauxite Ore', tPerDay: 20000, type: 'primary' },
+				{ name: 'Caustic Soda', tPerDay: 800, type: 'secondary' },
+			],
+			outputs: [
+				{ name: 'Alumina (Al₂O₃)', tPerDay: 10000, type: 'primary' },
+				{ name: 'Red Mud', tPerDay: 8000, type: 'waste' },
+				{ name: 'Process Water', tPerDay: 2000, type: 'waste' },
+			],
+			laborPerUnit: 450,
+			energyMW: 200,
+			capitalCostM: 3800,
+			color: '#e879f9',
+		},
+		{
+			id: 'smelter',
+			name: 'Electrolytic Smelting',
+			facility: 'Hall-Héroult Potline (×4)',
+			icon: '⚡',
+			inputs: [
+				{ name: 'Alumina (Al₂O₃)', tPerDay: 10000, type: 'primary' },
+				{ name: 'Carbon Anodes', tPerDay: 400, type: 'secondary' },
+				{ name: 'Cryolite Bath', tPerDay: 50, type: 'secondary' },
+			],
+			outputs: [
+				{ name: 'Molten Aluminum', tPerDay: 5000, type: 'primary' },
+				{ name: 'CO₂ Emissions', tPerDay: 3500, type: 'waste' },
+				{ name: 'Spent Anodes', tPerDay: 950, type: 'waste' },
+			],
+			laborPerUnit: 1200,
+			energyMW: 3125,
+			capitalCostM: 8500,
+			color: '#facc15',
+		},
+		{
+			id: 'al-casting',
+			name: 'Alloying & Casting',
+			facility: 'Casthouse (×2)',
+			icon: '🧪',
+			inputs: [
+				{ name: 'Molten Aluminum', tPerDay: 5000, type: 'primary' },
+				{ name: 'Alloy Additives', tPerDay: 250, type: 'secondary' },
+			],
+			outputs: [
+				{ name: 'Alloy Ingots', tPerDay: 4800, type: 'primary' },
+				{ name: 'Dross / Skim', tPerDay: 450, type: 'waste' },
+			],
+			laborPerUnit: 350,
+			energyMW: 80,
+			capitalCostM: 1600,
+			color: '#38bdf8',
+		},
+		{
+			id: 'al-forming',
+			name: 'Forming & Extrusion',
+			facility: 'Rolling Mill / Extruder (×3)',
+			icon: '🔨',
+			inputs: [
+				{ name: 'Alloy Ingots', tPerDay: 4800, type: 'primary' },
+			],
+			outputs: [
+				{ name: 'Structural Aluminum', tPerDay: 4400, type: 'primary' },
+				{ name: 'Scrap / Trim', tPerDay: 400, type: 'waste' },
+			],
+			laborPerUnit: 900,
+			energyMW: 150,
+			capitalCostM: 3200,
+			color: '#34d399',
+		},
+	];
+
 	// Compute connection flows: output of stage i → input of stage i+1
-	// Compare the primary output throughput vs the matching input throughput
 	interface Connection {
 		name: string;
 		outputTPD: number;
@@ -155,11 +249,11 @@
 		color: string;
 	}
 
-	function getConnections(): Connection[] {
+	function getConnections(chain: StageNode[]): Connection[] {
 		const conns: Connection[] = [];
-		for (let i = 0; i < steelChain.length - 1; i++) {
-			const src = steelChain[i];
-			const dst = steelChain[i + 1];
+		for (let i = 0; i < chain.length - 1; i++) {
+			const src = chain[i];
+			const dst = chain[i + 1];
 			const primaryOut = src.outputs.find(o => o.type === 'primary');
 			const matchIn = dst.inputs.find(inp => inp.type === 'primary');
 			if (primaryOut && matchIn) {
@@ -173,7 +267,8 @@
 		}
 		return conns;
 	}
-	const connections = getConnections();
+	const steelConnections = getConnections(steelChain);
+	const aluminumConnections = getConnections(aluminumChain);
 
 	// Build SVG taper polygon points for a connector
 	function taperPoints(outW: number, inW: number, svgH: number): string {
@@ -251,7 +346,7 @@
 
 					<!-- Connection between stages -->
 					{#if i < steelChain.length - 1}
-						{@const conn = connections[i]}
+						{@const conn = steelConnections[i]}
 						{@const outW = flowWidth(conn.outputTPD)}
 						{@const inW = flowWidth(conn.inputTPD)}
 						{@const maxW = Math.max(outW, inW)}
@@ -307,6 +402,119 @@
 				<div class="summary-item">
 					<span class="sum-label">Daily output</span>
 					<span class="sum-value">~13,500 t/day structural steel components per full chain</span>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Aluminum Production Chain -->
+	<div class="chain-section">
+		<h4 class="chain-title">🪶 Aluminum Production Chain</h4>
+
+		<div class="pipeline-scroll">
+			<div class="pipeline-row">
+				{#each aluminumChain as node, i}
+					<!-- Stage tile -->
+					<div class="stage-tile" style="border-color: {node.color}">
+						<!-- Header -->
+						<div class="tile-header" style="background: {node.color}18; border-bottom-color: {node.color}33">
+							<span class="tile-icon">{node.icon}</span>
+							<div class="tile-titles">
+								<span class="tile-name" style="color: {node.color}">{node.name}</span>
+								<span class="tile-facility">{node.facility}</span>
+							</div>
+						</div>
+
+						<!-- Inputs -->
+						<div class="tile-io-section">
+							<span class="tile-io-label">INPUTS</span>
+							{#each node.inputs as inp}
+								<div class="tile-io-row">
+									<div class="flow-indicator" style="width: {flowWidth(inp.tPerDay)}px; background: {flowColor(inp.type)}"></div>
+									<span class="tile-io-name">{inp.name}</span>
+									<span class="tile-io-amount">{formatTPD(inp.tPerDay)} t/d</span>
+								</div>
+							{/each}
+						</div>
+
+						<!-- Outputs -->
+						<div class="tile-io-section">
+							<span class="tile-io-label">OUTPUTS</span>
+							{#each node.outputs as out}
+								<div class="tile-io-row">
+									<div class="flow-indicator" style="width: {flowWidth(out.tPerDay)}px; background: {flowColor(out.type)}"></div>
+									<span class="tile-io-name" class:output-primary={out.type === 'primary'} class:output-waste={out.type === 'waste'}>
+										{out.name}
+									</span>
+									<span class="tile-io-amount">{formatTPD(out.tPerDay)} t/d</span>
+								</div>
+							{/each}
+						</div>
+
+						<!-- Stats footer -->
+						<div class="tile-footer">
+							<span class="tile-stat">👷 {node.laborPerUnit}</span>
+							<span class="tile-stat">⚡ {node.energyMW} MW</span>
+							<span class="tile-stat">💰 ${node.capitalCostM}M</span>
+						</div>
+					</div>
+
+					<!-- Connection between stages -->
+					{#if i < aluminumChain.length - 1}
+						{@const conn = aluminumConnections[i]}
+						{@const outW = flowWidth(conn.outputTPD)}
+						{@const inW = flowWidth(conn.inputTPD)}
+						{@const maxW = Math.max(outW, inW)}
+						<div class="stage-connector">
+							<div class="connector-flow" style="height: {maxW + 4}px">
+								<div class="flow-line-out" style="height: {outW}px; background: {conn.color}"></div>
+								{#if conn.outputTPD !== conn.inputTPD}
+									<svg class="flow-taper" viewBox="0 0 20 {maxW + 4}" preserveAspectRatio="none"
+										style="height: {maxW + 4}px">
+										<polygon
+											points="{taperPoints(outW, inW, maxW + 4)}"
+											fill="{conn.color}" opacity="0.5"
+										/>
+									</svg>
+								{/if}
+								<div class="flow-line-in" style="height: {inW}px; background: {conn.color}; opacity: 0.7"></div>
+							</div>
+							<div class="connector-label">
+								<span class="connector-name">{conn.name}</span>
+								<span class="connector-tpd">{formatTPD(conn.outputTPD)} t/d</span>
+								{#if conn.outputTPD !== conn.inputTPD}
+									<span class="connector-mismatch">→ {formatTPD(conn.inputTPD)} t/d in</span>
+								{/if}
+							</div>
+						</div>
+					{/if}
+				{/each}
+			</div>
+		</div>
+
+		<!-- Summary -->
+		<div class="chain-summary">
+			<h5 class="summary-title">Full Chain Summary</h5>
+			<div class="summary-stats">
+				<div class="summary-item">
+					<span class="sum-label">End-to-end</span>
+					<span class="sum-value">1 mine → 2 Bayer plants → 4 potlines → 2 casthouses → 3 forming mills</span>
+				</div>
+				<div class="summary-item">
+					<span class="sum-label">Total labor</span>
+					<span class="sum-value">~3,500 workers for a full integrated aluminum complex</span>
+				</div>
+				<div class="summary-item">
+					<span class="sum-label">Total energy</span>
+					<span class="sum-value">~3,585 MW (smelting dominates at 3,125 MW)</span>
+				</div>
+				<div class="summary-item">
+					<span class="sum-label">Total capital</span>
+					<span class="sum-value">~$20.3B for a complete mine-to-product facility</span>
+				</div>
+				<div class="summary-item">
+					<span class="sum-label">Daily output</span>
+					<span class="sum-value">~4,400 t/day structural aluminum per full chain</span>
 				</div>
 			</div>
 		</div>

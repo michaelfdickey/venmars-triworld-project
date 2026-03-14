@@ -86,6 +86,16 @@
 		</p>
 	</div>
 
+	<!-- Story blurb -->
+	<div class="relative z-10 max-w-xl mx-auto mb-10 px-6 py-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-panel)]">
+		<p class="text-sm text-[var(--color-text-dim)] leading-relaxed italic text-center">
+			In an age of abundance and prosperity, the Global Space Consortium has agreed to fund the
+			<span class="text-[var(--color-text)] font-semibold not-italic">VenMars Tri-World Project</span>
+			— creating two new habitable worlds in our solar system to encourage the expansion of human
+			civilization among the stars and to mitigate the threats existential risks pose.
+		</p>
+	</div>
+
 	<!-- Difficulty selector -->
 	<div class="relative z-10 mb-8">
 		<p class="text-xs text-[var(--color-text-dim)] mb-3 text-center uppercase tracking-widest">Budget Difficulty</p>

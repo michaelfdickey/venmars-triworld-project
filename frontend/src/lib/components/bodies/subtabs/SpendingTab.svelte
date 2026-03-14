@@ -34,12 +34,48 @@
 	let reserves = $state(320);
 	let reserveCapacity = 2000;
 
-	function adjust(index: number, delta: number) {
-		const next = categories[index].allocated + delta;
-		if (next < 0) return;
-		const newTotal = totalAllocated + delta;
-		if (newTotal > annualBudget) return;
-		categories[index].allocated = next;
+	function setAllocated(index: number, value: number) {
+		const clamped = Math.max(0, Math.round(value));
+		const othersTotal = totalAllocated - categories[index].allocated;
+		const maxAllowed = annualBudget - othersTotal;
+		categories[index].allocated = Math.min(clamped, maxAllowed);
+	}
+
+	function handleInput(index: number, e: Event) {
+		const target = e.target as HTMLInputElement;
+		const parsed = parseInt(target.value, 10);
+		if (!isNaN(parsed)) {
+			setAllocated(index, parsed);
+		}
+	}
+
+	// Draggable bar logic
+	let draggingIndex = $state<number | null>(null);
+
+	function startDrag(index: number, e: PointerEvent) {
+		draggingIndex = index;
+		const bar = (e.currentTarget as HTMLElement).closest('.spend-bar-track') as HTMLElement;
+		if (!bar) return;
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		updateDrag(index, bar, e.clientX);
+	}
+
+	function onDragMove(index: number, e: PointerEvent) {
+		if (draggingIndex !== index) return;
+		const bar = (e.currentTarget as HTMLElement).closest('.spend-bar-track') as HTMLElement;
+		if (!bar) return;
+		updateDrag(index, bar, e.clientX);
+	}
+
+	function endDrag() {
+		draggingIndex = null;
+	}
+
+	function updateDrag(index: number, bar: HTMLElement, clientX: number) {
+		const rect = bar.getBoundingClientRect();
+		const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+		const value = Math.round(pct * annualBudget);
+		setAllocated(index, value);
 	}
 
 	// Pie chart geometry
@@ -195,16 +231,29 @@
 						<span class="spend-name">{cat.name}</span>
 						<span class="spend-desc">{cat.description}</span>
 					</div>
+					<div class="spend-input-wrap">
+						<span class="spend-dollar">$</span>
+						<input
+							class="spend-input"
+							type="number"
+							min="0"
+							max={annualBudget}
+							value={cat.allocated}
+							oninput={(e) => handleInput(i, e)}
+						/>
+						<span class="spend-unit">B</span>
+					</div>
 				</div>
-				<div class="spend-controls">
-					<button class="adj-btn" onclick={() => adjust(i, -5)} disabled={cat.allocated <= 0}>−5</button>
-					<button class="adj-btn" onclick={() => adjust(i, -1)} disabled={cat.allocated <= 0}>−</button>
-					<span class="spend-amount">${cat.allocated}B</span>
-					<button class="adj-btn" onclick={() => adjust(i, 1)} disabled={remaining <= 0}>+</button>
-					<button class="adj-btn" onclick={() => adjust(i, 5)} disabled={remaining < 5}>+5</button>
-				</div>
-				<div class="spend-bar-bg">
-					<div class="spend-bar" style="width: {(cat.allocated / annualBudget) * 100}%"></div>
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					class="spend-bar-track"
+					onpointerdown={(e) => startDrag(i, e)}
+					onpointermove={(e) => onDragMove(i, e)}
+					onpointerup={endDrag}
+					onpointercancel={endDrag}
+				>
+					<div class="spend-bar-fill" style="width: {(cat.allocated / annualBudget) * 100}%; background: {cat.color}"></div>
+					<div class="spend-bar-thumb" style="left: {(cat.allocated / annualBudget) * 100}%; background: {cat.color}"></div>
 				</div>
 			</div>
 		{/each}
@@ -474,52 +523,80 @@
 	.spend-name { font-size: 0.8rem; font-weight: 600; }
 	.spend-desc { font-size: 0.65rem; color: var(--color-text-dim); }
 
-	.spend-controls {
+	.spend-input-wrap {
 		display: flex;
 		align-items: center;
-		gap: 0.3rem;
-		margin-bottom: 0.3rem;
+		gap: 0.15rem;
+		margin-left: auto;
+		flex-shrink: 0;
 	}
 
-	.adj-btn {
-		padding: 0.15rem 0.4rem;
-		border-radius: 0.25rem;
-		border: 1px solid var(--color-border);
-		background: transparent;
+	.spend-dollar {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.85rem;
 		color: var(--color-text-dim);
-		font-size: 0.7rem;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-	.adj-btn:hover:not(:disabled) {
-		background: var(--color-border);
-		color: var(--color-text);
-	}
-	.adj-btn:disabled {
-		opacity: 0.3;
-		cursor: not-allowed;
 	}
 
-	.spend-amount {
+	.spend-input {
 		font-family: 'JetBrains Mono', 'Fira Code', monospace;
 		font-size: 0.85rem;
 		font-weight: 700;
-		min-width: 4rem;
-		text-align: center;
 		color: #60a5fa;
+		background: transparent;
+		border: 1px solid var(--color-border);
+		border-radius: 0.25rem;
+		padding: 0.15rem 0.3rem;
+		width: 4.5rem;
+		text-align: right;
+		-moz-appearance: textfield;
 	}
 
-	.spend-bar-bg {
-		height: 3px;
-		background: var(--color-border);
-		border-radius: 2px;
-		overflow: hidden;
+	.spend-input::-webkit-inner-spin-button,
+	.spend-input::-webkit-outer-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
 	}
-	.spend-bar {
+
+	.spend-input:focus {
+		outline: none;
+		border-color: #60a5fa;
+	}
+
+	.spend-unit {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.75rem;
+		color: var(--color-text-dim);
+	}
+
+	/* Draggable bar */
+	.spend-bar-track {
+		position: relative;
+		height: 14px;
+		background: var(--color-border);
+		border-radius: 4px;
+		overflow: visible;
+		cursor: pointer;
+		touch-action: none;
+		user-select: none;
+	}
+
+	.spend-bar-fill {
 		height: 100%;
-		background: #60a5fa;
-		border-radius: 2px;
-		transition: width 0.2s;
+		border-radius: 4px;
+		transition: width 0.05s;
+		pointer-events: none;
+	}
+
+	.spend-bar-thumb {
+		position: absolute;
+		top: -3px;
+		width: 6px;
+		height: 20px;
+		border-radius: 3px;
+		transform: translateX(-3px);
+		box-shadow: 0 0 4px rgba(0,0,0,0.4);
+		pointer-events: none;
+		transition: left 0.05s;
 	}
 
 	.constraints-box {

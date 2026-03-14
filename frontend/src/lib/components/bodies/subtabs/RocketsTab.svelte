@@ -1,259 +1,58 @@
 <script lang="ts">
-	let { bodyId }: { bodyId: string } = $props();
+	import { rocketDefs, rocketInventory, launchComplexCosts, claimedComplexes, type RocketDef } from '$lib/stores/gameStore';
 
-	interface Rocket {
-		name: string;
-		provider: string;
-		status: 'operational' | 'development' | 'retired';
-		payloadLEO: number;
-		payloadGTO: number;
-		payloadTLI: number;
-		fairingVolume_m3: number;
-		costPerLaunch: number;
-		reusable: boolean;
-		stages: number;
-		height: number;
-		diameter: number;
-		propellant: string;
-		thrust: number;
-		color: string;
-		shape: 'single' | 'triple' | 'wide-dual' | 'srb';
-	}
+	let { bodyId }: { bodyId: string } = $props();
 
 	const maxHeight = 121;
 
-	// Inventory: per-body map of rocket name → count
-	const inventory: Record<string, Record<string, number>> = $state({
-		earth: {
-			'Starship / Super Heavy': 1,
-			'Falcon Heavy': 1,
-			'Falcon 9 Block 5': 1,
-			'SLS Block 2': 1,
-			'New Glenn': 1,
-			'Vulcan Centaur': 1,
-			'Long March 9': 1,
-			'Ariane 6 (A64)': 1,
-			'Neutron': 1,
-			'Terran R': 1,
-		},
-		moon: {},
-		venus: {},
-		mars: {},
-		asteroids: {},
-	});
-
-	function getCount(rocketName: string): number {
-		return inventory[bodyId]?.[rocketName] ?? 0;
+	// ── Inventory helpers using writable store ──
+	function getOwned(rocketId: string): number {
+		return $rocketInventory[rocketId] ?? 0;
 	}
 
-	function adjustCount(rocketName: string, delta: number) {
-		if (!inventory[bodyId]) inventory[bodyId] = {};
-		const current = inventory[bodyId][rocketName] ?? 0;
-		const next = Math.max(0, current + delta);
-		inventory[bodyId][rocketName] = next;
+	function getGlobalAvailable(rocket: RocketDef): number {
+		return Math.max(0, rocket.globalInventory - getOwned(rocket.id));
 	}
 
-	let totalInventory = $derived(
-		Object.values(inventory[bodyId] ?? {}).reduce((sum, n) => sum + n, 0)
+	function purchase(rocket: RocketDef) {
+		if (getGlobalAvailable(rocket) <= 0) return;
+		// Must own the home base launch complex to purchase
+		if (!$claimedComplexes.has(rocket.homeBase)) return;
+		rocketInventory.update(inv => ({ ...inv, [rocket.id]: (inv[rocket.id] ?? 0) + 1 }));
+	}
+
+	function sell(rocketId: string) {
+		const current = getOwned(rocketId);
+		if (current <= 0) return;
+		rocketInventory.update(inv => ({ ...inv, [rocketId]: current - 1 }));
+	}
+
+	let totalOwned = $derived(
+		Object.values($rocketInventory).reduce((sum, n) => sum + n, 0)
 	);
 
-	const rockets: Rocket[] = [
-		{
-			name: 'Starship / Super Heavy',
-			provider: 'SpaceX',
-			status: 'operational',
-			payloadLEO: 150000,
-			payloadGTO: 21000,
-			payloadTLI: 50000,
-			fairingVolume_m3: 1000,
-			costPerLaunch: 10,
-			reusable: true,
-			stages: 2,
-			height: 121,
-			diameter: 9,
-			propellant: 'LCH₄ / LOX',
-			thrust: 74500,
-			color: '#3b82f6',
-			shape: 'wide-dual',
-		},
-		{
-			name: 'Falcon Heavy',
-			provider: 'SpaceX',
-			status: 'operational',
-			payloadLEO: 63800,
-			payloadGTO: 26700,
-			payloadTLI: 16000,
-			fairingVolume_m3: 145,
-			costPerLaunch: 97,
-			reusable: true,
-			stages: 2,
-			height: 70,
-			diameter: 3.66,
-			propellant: 'RP-1 / LOX',
-			thrust: 22819,
-			color: '#60a5fa',
-			shape: 'triple',
-		},
-		{
-			name: 'Falcon 9 Block 5',
-			provider: 'SpaceX',
-			status: 'operational',
-			payloadLEO: 22800,
-			payloadGTO: 8300,
-			payloadTLI: 4020,
-			fairingVolume_m3: 145,
-			costPerLaunch: 67,
-			reusable: true,
-			stages: 2,
-			height: 70,
-			diameter: 3.66,
-			propellant: 'RP-1 / LOX',
-			thrust: 7607,
-			color: '#93c5fd',
-			shape: 'single',
-		},
-		{
-			name: 'SLS Block 2',
-			provider: 'NASA / Boeing',
-			status: 'operational',
-			payloadLEO: 130000,
-			payloadGTO: 42000,
-			payloadTLI: 46000,
-			fairingVolume_m3: 830,
-			costPerLaunch: 2200,
-			reusable: false,
-			stages: 2,
-			height: 111,
-			diameter: 8.4,
-			propellant: 'LH₂ / LOX + SRBs',
-			thrust: 39144,
-			color: '#f97316',
-			shape: 'srb',
-		},
-		{
-			name: 'New Glenn',
-			provider: 'Blue Origin',
-			status: 'operational',
-			payloadLEO: 45000,
-			payloadGTO: 13000,
-			payloadTLI: 8000,
-			fairingVolume_m3: 400,
-			costPerLaunch: 68,
-			reusable: true,
-			stages: 2,
-			height: 98,
-			diameter: 7,
-			propellant: 'LCH₄ / LOX (S1) + LH₂ / LOX (S2)',
-			thrust: 17100,
-			color: '#06b6d4',
-			shape: 'wide-dual',
-		},
-		{
-			name: 'Vulcan Centaur',
-			provider: 'ULA',
-			status: 'operational',
-			payloadLEO: 27200,
-			payloadGTO: 14400,
-			payloadTLI: 7700,
-			fairingVolume_m3: 172,
-			costPerLaunch: 110,
-			reusable: false,
-			stages: 2,
-			height: 62,
-			diameter: 5.4,
-			propellant: 'LCH₄ / LOX + SRBs',
-			thrust: 11060,
-			color: '#fbbf24',
-			shape: 'srb',
-		},
-		{
-			name: 'Long March 9',
-			provider: 'CASC (China)',
-			status: 'operational',
-			payloadLEO: 150000,
-			payloadGTO: 50000,
-			payloadTLI: 53000,
-			fairingVolume_m3: 900,
-			costPerLaunch: 500,
-			reusable: false,
-			stages: 3,
-			height: 114,
-			diameter: 10.6,
-			propellant: 'Kerolox (S1) + LH₂ / LOX (S2/S3)',
-			thrust: 57840,
-			color: '#ef4444',
-			shape: 'srb',
-		},
-		{
-			name: 'Ariane 6 (A64)',
-			provider: 'ArianeGroup (ESA)',
-			status: 'operational',
-			payloadLEO: 21650,
-			payloadGTO: 11500,
-			payloadTLI: 4500,
-			fairingVolume_m3: 180,
-			costPerLaunch: 115,
-			reusable: false,
-			stages: 2,
-			height: 63,
-			diameter: 5.4,
-			propellant: 'LH₂ / LOX + SRBs',
-			thrust: 8000,
-			color: '#8b5cf6',
-			shape: 'srb',
-		},
-		{
-			name: 'Neutron',
-			provider: 'Rocket Lab',
-			status: 'operational',
-			payloadLEO: 13000,
-			payloadGTO: 3000,
-			payloadTLI: 1500,
-			fairingVolume_m3: 100,
-			costPerLaunch: 50,
-			reusable: true,
-			stages: 2,
-			height: 43,
-			diameter: 4.6,
-			propellant: 'LCH₄ / LOX',
-			thrust: 6900,
-			color: '#10b981',
-			shape: 'single',
-		},
-		{
-			name: 'Terran R',
-			provider: 'Relativity Space',
-			status: 'development',
-			payloadLEO: 33500,
-			payloadGTO: 12000,
-			payloadTLI: 5500,
-			fairingVolume_m3: 160,
-			costPerLaunch: 55,
-			reusable: true,
-			stages: 2,
-			height: 66,
-			diameter: 5,
-			propellant: 'LCH₄ / LOX',
-			thrust: 11000,
-			color: '#a78bfa',
-			shape: 'single',
-		},
-	];
+	let totalMaintenanceCostM = $derived(
+		rocketDefs.reduce((sum, r) => sum + getOwned(r.id) * r.maintenanceCostM, 0)
+	);
 
 	function formatMass(kg: number): string {
 		if (kg >= 1000) return (kg / 1000).toFixed(1) + ' t';
 		return kg.toLocaleString() + ' kg';
 	}
 
-	function statusColor(s: Rocket['status']): string {
+	function statusColor(s: RocketDef['status']): string {
 		if (s === 'operational') return '#4ade80';
 		if (s === 'development') return '#fbbf24';
 		return '#6b7280';
 	}
 
+	function homeBaseName(complexId: string): string {
+		return launchComplexCosts[complexId]?.name ?? complexId;
+	}
+
 	let sortKey = $state<'payloadLEO' | 'costPerLaunch' | 'name'>('payloadLEO');
 	let sortedRockets = $derived(
-		[...rockets].sort((a, b) => {
+		[...rocketDefs].sort((a, b) => {
 			if (sortKey === 'name') return a.name.localeCompare(b.name);
 			if (sortKey === 'costPerLaunch') return a.costPerLaunch - b.costPerLaunch;
 			return b.payloadLEO - a.payloadLEO;
@@ -265,8 +64,10 @@
 	<div class="rockets-header">
 		<h3 class="text-lg font-semibold">Launch Vehicles</h3>
 		<div class="inventory-summary">
-			<span class="inventory-total">{totalInventory}</span>
-			<span class="inventory-label">vehicles</span>
+			<span class="inventory-total">{totalOwned}</span>
+			<span class="inventory-label">owned</span>
+			<span class="inventory-sep">·</span>
+			<span class="inventory-cost">${(totalMaintenanceCostM / 1000).toFixed(2)}B/yr</span>
 		</div>
 		<div class="sort-controls">
 			<span class="sort-label">Sort:</span>
@@ -278,12 +79,41 @@
 
 	<div class="rocket-list">
 		{#each sortedRockets as rocket}
-			<div class="rocket-card" class:no-stock={getCount(rocket.name) === 0}>
+			{@const owned = getOwned(rocket.id)}
+			{@const available = getGlobalAvailable(rocket)}
+			{@const hasBase = $claimedComplexes.has(rocket.homeBase)}
+			<div class="rocket-card" class:no-stock={owned === 0}>
 				<!-- Inventory controls -->
-				<div class="inventory-controls" style="border-color: {rocket.color}">
-					<button class="inv-btn" onclick={() => adjustCount(rocket.name, -1)} disabled={getCount(rocket.name) === 0}>−</button>
-					<span class="inv-count" style="color: {getCount(rocket.name) > 0 ? rocket.color : 'var(--color-text-dim)'}">{getCount(rocket.name)}</span>
-					<button class="inv-btn" onclick={() => adjustCount(rocket.name, 1)}>+</button>
+				<div class="inventory-panel" style="border-color: {rocket.color}">
+					<div class="inv-row">
+						<span class="inv-label">Global</span>
+						<span class="inv-global-count">{rocket.globalInventory}</span>
+					</div>
+					<div class="inv-row">
+						<span class="inv-label">Available</span>
+						<span class="inv-avail-count" class:none={available === 0}>{available}</span>
+					</div>
+					<div class="inv-row inv-row-owned">
+						<span class="inv-label">Owned</span>
+						<div class="inv-controls">
+							<button class="inv-btn" onclick={() => sell(rocket.id)} disabled={owned === 0}>−</button>
+							<span class="inv-count" style="color: {owned > 0 ? rocket.color : 'var(--color-text-dim)'}">{owned}</span>
+							<button class="inv-btn" onclick={() => purchase(rocket)} disabled={available === 0 || !hasBase}>+</button>
+						</div>
+					</div>
+					{#if owned > 0}
+						<div class="inv-maint">
+							<span class="inv-maint-label">Maint:</span>
+							<span class="inv-maint-val">${(owned * rocket.maintenanceCostM).toFixed(0)}M/yr</span>
+						</div>
+					{/if}
+					<div class="inv-home">
+						<span class="inv-home-icon">{hasBase ? '🏠' : '🔒'}</span>
+						<span class="inv-home-name" class:locked={!hasBase}>{homeBaseName(rocket.homeBase)}</span>
+					</div>
+					{#if !hasBase}
+						<span class="inv-home-hint">Claim complex to purchase</span>
+					{/if}
 				</div>
 
 				<!-- Horizontal rocket silhouette above specs -->
@@ -348,8 +178,12 @@
 						<span class="spec-value">{rocket.fairingVolume_m3} m³</span>
 					</div>
 					<div class="spec">
-						<span class="spec-label">Cost</span>
+						<span class="spec-label">Launch</span>
 						<span class="spec-value">${rocket.costPerLaunch}M</span>
+					</div>
+					<div class="spec">
+						<span class="spec-label">Purchase</span>
+						<span class="spec-value">${rocket.purchaseCostM}M</span>
 					</div>
 				</div>
 
@@ -427,22 +261,8 @@
 	.rocket-card:hover {
 		border-color: var(--color-text-dim);
 	}
-	.rocket-card.no-stock {
-		opacity: 0.45;
-	}
-
-	.inventory-controls {
-		position: absolute;
-		top: 0.4rem;
-		right: 0.5rem;
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		border: 1px solid;
-		border-radius: 1rem;
-		padding: 0.15rem 0.3rem;
-		background: var(--color-bg);
-		z-index: 1;
+	.rocket-card.no-stock > :not(.inventory-panel) {
+		opacity: 0.55;
 	}
 
 	.inv-btn {
@@ -494,6 +314,113 @@
 	.inventory-label {
 		font-size: 0.7rem;
 		color: var(--color-text-dim);
+	}
+
+	.inventory-sep {
+		color: var(--color-border);
+	}
+
+	.inventory-cost {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.75rem;
+		color: #fbbf24;
+	}
+
+	/* Inventory panel */
+	.inventory-panel {
+		position: absolute;
+		top: 0.4rem;
+		right: 0.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		border: 1px solid;
+		border-radius: 0.5rem;
+		padding: 0.35rem 0.45rem;
+		background: var(--color-bg);
+		z-index: 1;
+		min-width: 110px;
+	}
+
+	.inv-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.3rem;
+	}
+
+	.inv-row-owned {
+		padding-top: 0.15rem;
+		border-top: 1px solid var(--color-border);
+	}
+
+	.inv-label {
+		font-size: 0.55rem;
+		color: var(--color-text-dim);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.inv-global-count {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.7rem;
+		color: var(--color-text-dim);
+	}
+
+	.inv-avail-count {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.7rem;
+		color: #4ade80;
+	}
+	.inv-avail-count.none { color: #ef4444; }
+
+	.inv-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.2rem;
+	}
+
+	.inv-maint {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding-top: 0.1rem;
+	}
+
+	.inv-maint-label {
+		font-size: 0.5rem;
+		color: var(--color-text-dim);
+	}
+
+	.inv-maint-val {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.6rem;
+		color: #fbbf24;
+	}
+
+	.inv-home {
+		display: flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding-top: 0.1rem;
+		border-top: 1px solid var(--color-border);
+	}
+
+	.inv-home-icon { font-size: 0.6rem; }
+
+	.inv-home-name {
+		font-size: 0.5rem;
+		color: var(--color-text-dim);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.inv-home-name.locked { color: #ef4444; }
+
+	.inv-home-hint {
+		font-size: 0.45rem;
+		color: #ef4444;
+		font-style: italic;
 	}
 
 	.rocket-visual {
@@ -550,7 +477,7 @@
 
 	.rocket-specs {
 		display: grid;
-		grid-template-columns: repeat(5, 1fr);
+		grid-template-columns: repeat(6, 1fr);
 		gap: 0.4rem;
 		margin-bottom: 0.5rem;
 	}

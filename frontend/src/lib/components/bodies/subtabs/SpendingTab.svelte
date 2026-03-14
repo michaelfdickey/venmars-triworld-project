@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { difficulty, difficultyConfig, spendingAllocations, spendingReserves, claimedComplexes, launchComplexCosts, materialAllocations, materialDefs, materialCostB as matCostBFn } from '$lib/stores/gameStore';
+	import { difficulty, difficultyConfig, spendingAllocations, spendingReserves, claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -63,26 +63,34 @@
 		claimedLaunchCosts.reduce((sum, c) => sum + c.costB, 0)
 	);
 
-	// Material demands grouped by spending category index
-	let materialDemandsByCategory = $derived.by(() => {
-		const map = new Map<number, CostDemandItem[]>();
-		for (let i = 0; i < materialDefs.length; i++) {
-			const m = materialDefs[i];
-			const costB = matCostBFn(i, $materialAllocations[i]);
-			if (costB <= 0) continue;
-			const catIdx = m.spendingCategoryIndex;
-			if (!map.has(catIdx)) map.set(catIdx, []);
-			map.get(catIdx)!.push({ name: m.name, costB, color: m.color });
+	// Rocket maintenance cost demand (category 1 = Rocket Manufacturing)
+	let rocketMaintCosts = $derived.by(() => {
+		const items: CostDemandItem[] = [];
+		const colors = ['#f87171', '#fb923c', '#fbbf24', '#a3e635', '#34d399', '#22d3ee', '#818cf8', '#e879f9', '#fb7185', '#fdba74'];
+		let ci = 0;
+		for (const rocket of rocketDefs) {
+			const count = $rocketInventory[rocket.id] ?? 0;
+			if (count <= 0) continue;
+			items.push({
+				name: `${rocket.name} ×${count}`,
+				costB: (count * rocket.maintenanceCostM) / 1000,
+				color: colors[ci % colors.length],
+			});
+			ci++;
 		}
-		return map;
+		return items;
 	});
 
-	// Cost demand per category (in $B). Index 0 = Launch Infrastructure.
+	let rocketMaintDemandB = $derived(
+		rocketMaintCosts.reduce((sum, c) => sum + c.costB, 0)
+	);
+
+	// Cost demand per category (in $B).
+	// Demands come from actual consumption drivers (claimed complexes, owned rockets, etc.)
 	function getCostDemandB(catIndex: number): number {
 		if (catIndex === 0) return launchInfraDemandB;
-		const matItems = materialDemandsByCategory.get(catIndex);
-		if (matItems) return matItems.reduce((s, it) => s + it.costB, 0);
-		return 0;
+		if (catIndex === 1) return rocketMaintDemandB;
+		return 0; // other categories gain demands as game mechanics are built
 	}
 
 	// ── Detail modal state ──
@@ -105,20 +113,23 @@
 	let detailPieSlices = $derived.by(() => {
 		if (detailModalIndex === null || !detailCat) return [];
 		const allocated = detailCat.allocated;
-		if (allocated <= 0) return [];
 
 		const slices: DetailSlice[] = [];
 		let cumAngle = -Math.PI / 2;
 
-		// Add individual demand items
+		// Collect demand items for this category
 		const items: CostDemandItem[] = [];
 		if (detailModalIndex === 0) items.push(...claimedLaunchCosts);
-		const matItems = materialDemandsByCategory.get(detailModalIndex);
-		if (matItems) items.push(...matItems);
+		if (detailModalIndex === 1) items.push(...rocketMaintCosts);
 		const totalDemand = items.reduce((s, it) => s + it.costB, 0);
 
+		if (allocated <= 0 && totalDemand <= 0) return [];
+
+		// Scale pie relative to whichever is larger: allocated or demand
+		const pieTotal = Math.max(allocated, totalDemand, 0.001);
+
 		for (const item of items) {
-			const pct = item.costB / allocated;
+			const pct = item.costB / pieTotal;
 			if (pct <= 0) continue;
 			const angle = Math.min(pct, 1) * 2 * Math.PI;
 			const start = cumAngle;
@@ -137,10 +148,10 @@
 			cumAngle = end;
 		}
 
-		// Unallocated remainder
-		const unalloc = allocated - totalDemand;
-		if (unalloc > 0.001) {
-			const pct = unalloc / allocated;
+		// Remainder (unmet or unallocated portion)
+		const remainder = pieTotal - totalDemand;
+		if (remainder > 0.001) {
+			const pct = remainder / pieTotal;
 			const angle = pct * 2 * Math.PI;
 			const start = cumAngle;
 			const end = cumAngle + angle;
@@ -150,8 +161,8 @@
 			const y2 = DETAIL_CY + DETAIL_R * Math.sin(end);
 			const large = angle > Math.PI ? 1 : 0;
 			slices.push({
-				label: 'Unallocated',
-				value: unalloc,
+				label: allocated > 0 ? 'Unallocated' : 'Unfunded',
+				value: remainder,
 				color: '#334155',
 				path: `M${DETAIL_CX},${DETAIL_CY} L${x1},${y1} A${DETAIL_R},${DETAIL_R} 0 ${large} 1 ${x2},${y2} Z`,
 			});
@@ -391,7 +402,7 @@
 				>
 					<!-- Shadow demand bar (striped, behind the slider fill) -->
 					{#if demandB > 0}
-						<div class="spend-bar-demand" style="width: {Math.min(100, (demandB / annualBudget) * 100)}%; --demand-color: {cat.color}"></div>
+						<div class="spend-bar-demand" style="width: {Math.max(1.5, Math.min(100, (demandB / annualBudget) * 100))}%; --demand-color: {cat.color}"></div>
 					{/if}
 					<div class="spend-bar-fill" style="width: {(cat.allocated / annualBudget) * 100}%; background: {cat.color}"></div>
 					<div class="spend-bar-thumb" style="left: {(cat.allocated / annualBudget) * 100}%; background: {cat.color}"></div>
@@ -430,7 +441,7 @@
 								<path d={slice.path} fill={slice.color} stroke="var(--color-bg)" stroke-width="1" />
 							{/each}
 							<circle cx={DETAIL_CX} cy={DETAIL_CY} r="30" fill="var(--color-bg-panel)" />
-							<text x={DETAIL_CX} y={DETAIL_CY - 4} text-anchor="middle" fill="var(--color-text)" font-size="10" font-weight="700">${detailCat.allocated}B</text>
+							<text x={DETAIL_CX} y={DETAIL_CY - 4} text-anchor="middle" fill="var(--color-text)" font-size="10" font-weight="700">{detailCat.allocated > 0 ? `$${detailCat.allocated}B` : 'No budget'}</text>
 							<text x={DETAIL_CX} y={DETAIL_CY + 8} text-anchor="middle" fill="var(--color-text-dim)" font-size="6">allocated</text>
 						</svg>
 						<div class="detail-legend">
@@ -802,14 +813,17 @@
 		height: 100%;
 		border-radius: 4px;
 		pointer-events: none;
-		background: repeating-linear-gradient(
-			-45deg,
-			transparent,
-			transparent 3px,
-			color-mix(in srgb, var(--demand-color) 25%, transparent) 3px,
-			color-mix(in srgb, var(--demand-color) 25%, transparent) 6px
-		);
+		background:
+			repeating-linear-gradient(
+				-45deg,
+				transparent,
+				transparent 3px,
+				color-mix(in srgb, var(--demand-color) 50%, transparent) 3px,
+				color-mix(in srgb, var(--demand-color) 50%, transparent) 6px
+			),
+			color-mix(in srgb, var(--demand-color) 15%, transparent);
 		z-index: 0;
+		min-width: 14px;
 	}
 
 	.spend-bar-fill {

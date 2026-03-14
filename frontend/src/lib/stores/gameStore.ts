@@ -160,67 +160,231 @@ export interface ConsumptionDemandItem {
 }
 
 // Material consumption profiles per launch complex (annual, in tonnes unless TWh)
+// Only ongoing maintenance materials — propellant demands are driven by scheduled launches
 export interface LaunchComplexConsumption {
 	name: string;
-	items: { material: string; amountMt: number }[];
+	maintenance: { material: string; amountMt: number }[];  // ongoing facility upkeep
+	perLaunch: { material: string; amountMt: number }[];    // consumed per launch (future use)
 }
 
 export const launchComplexConsumption: Record<string, LaunchComplexConsumption> = {
-	'ksc-39a':      { name: 'Kennedy SC (LC-39A)',    items: [
+	'ksc-39a':      { name: 'Kennedy SC (LC-39A)',    maintenance: [
 		{ material: 'Steel', amountMt: 0.012 }, { material: 'Concrete / Cement', amountMt: 0.05 },
-		{ material: 'LOX', amountMt: 0.45 }, { material: 'LCH₄', amountMt: 0.18 },
-		{ material: 'RP-1 Kerosene', amountMt: 0.008 }, { material: 'Electricity', amountMt: 2.1 },
+		{ material: 'Electricity', amountMt: 2.1 },
 		{ material: 'Copper', amountMt: 0.0008 }, { material: 'Aluminum', amountMt: 0.003 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.019 }, { material: 'LCH₄', amountMt: 0.0075 },
+		{ material: 'RP-1 Kerosene', amountMt: 0.00033 },
 	] },
-	'ccafs-40':     { name: 'Cape Canaveral (SLC-40)', items: [
+	'ccafs-40':     { name: 'Cape Canaveral (SLC-40)', maintenance: [
 		{ material: 'Steel', amountMt: 0.008 }, { material: 'Concrete / Cement', amountMt: 0.03 },
-		{ material: 'LOX', amountMt: 0.35 }, { material: 'RP-1 Kerosene', amountMt: 0.012 },
-		{ material: 'LCH₄', amountMt: 0.1 }, { material: 'Electricity', amountMt: 1.8 },
+		{ material: 'Electricity', amountMt: 1.8 },
 		{ material: 'Copper', amountMt: 0.0005 }, { material: 'Aluminum', amountMt: 0.002 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.00875 }, { material: 'RP-1 Kerosene', amountMt: 0.0003 },
+		{ material: 'LCH₄', amountMt: 0.0025 },
 	] },
-	'baikonur':     { name: 'Baikonur Cosmodrome',    items: [
+	'baikonur':     { name: 'Baikonur Cosmodrome',    maintenance: [
 		{ material: 'Steel', amountMt: 0.015 }, { material: 'Concrete / Cement', amountMt: 0.08 },
-		{ material: 'LOX', amountMt: 0.25 }, { material: 'RP-1 Kerosene', amountMt: 0.01 },
-		{ material: 'Hydrazine', amountMt: 0.0004 }, { material: 'Electricity', amountMt: 1.5 },
+		{ material: 'Electricity', amountMt: 1.5 },
 		{ material: 'Copper', amountMt: 0.0006 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.0139 }, { material: 'RP-1 Kerosene', amountMt: 0.00056 },
+		{ material: 'Hydrazine', amountMt: 0.000022 },
 	] },
-	'vandenberg':   { name: 'Vandenberg SFB',         items: [
+	'vandenberg':   { name: 'Vandenberg SFB',         maintenance: [
 		{ material: 'Steel', amountMt: 0.007 }, { material: 'Concrete / Cement', amountMt: 0.025 },
-		{ material: 'LOX', amountMt: 0.3 }, { material: 'RP-1 Kerosene', amountMt: 0.011 },
-		{ material: 'LCH₄', amountMt: 0.08 }, { material: 'Electricity', amountMt: 1.6 },
+		{ material: 'Electricity', amountMt: 1.6 },
 		{ material: 'Copper', amountMt: 0.0004 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.01 }, { material: 'RP-1 Kerosene', amountMt: 0.000367 },
+		{ material: 'LCH₄', amountMt: 0.00267 },
 	] },
-	'xichang':      { name: 'Xichang SLC',            items: [
+	'xichang':      { name: 'Xichang SLC',            maintenance: [
 		{ material: 'Steel', amountMt: 0.006 }, { material: 'Concrete / Cement', amountMt: 0.04 },
-		{ material: 'LOX', amountMt: 0.15 }, { material: 'LH₂', amountMt: 0.03 },
-		{ material: 'Hydrazine', amountMt: 0.0003 }, { material: 'Electricity', amountMt: 1.2 },
+		{ material: 'Electricity', amountMt: 1.2 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.01 }, { material: 'LH₂', amountMt: 0.002 },
+		{ material: 'Hydrazine', amountMt: 0.00002 },
 	] },
-	'wenchang':     { name: 'Wenchang SLS',           items: [
+	'wenchang':     { name: 'Wenchang SLS',           maintenance: [
 		{ material: 'Steel', amountMt: 0.009 }, { material: 'Concrete / Cement', amountMt: 0.035 },
-		{ material: 'LOX', amountMt: 0.2 }, { material: 'LH₂', amountMt: 0.05 },
-		{ material: 'LCH₄', amountMt: 0.06 }, { material: 'Electricity', amountMt: 1.4 },
+		{ material: 'Electricity', amountMt: 1.4 },
 		{ material: 'Aluminum', amountMt: 0.002 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.0133 }, { material: 'LH₂', amountMt: 0.00333 },
+		{ material: 'LCH₄', amountMt: 0.004 },
 	] },
-	'jiuquan':      { name: 'Jiuquan SLC',            items: [
+	'jiuquan':      { name: 'Jiuquan SLC',            maintenance: [
 		{ material: 'Steel', amountMt: 0.005 }, { material: 'Concrete / Cement', amountMt: 0.03 },
-		{ material: 'LOX', amountMt: 0.12 }, { material: 'RP-1 Kerosene', amountMt: 0.005 },
-		{ material: 'Hydrazine', amountMt: 0.0002 }, { material: 'Electricity', amountMt: 1.0 },
+		{ material: 'Electricity', amountMt: 1.0 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.008 }, { material: 'RP-1 Kerosene', amountMt: 0.000333 },
+		{ material: 'Hydrazine', amountMt: 0.0000133 },
 	] },
-	'sriharikota':  { name: 'Satish Dhawan SC',       items: [
+	'sriharikota':  { name: 'Satish Dhawan SC',       maintenance: [
 		{ material: 'Steel', amountMt: 0.004 }, { material: 'Concrete / Cement', amountMt: 0.02 },
-		{ material: 'LOX', amountMt: 0.1 }, { material: 'LH₂', amountMt: 0.02 },
-		{ material: 'Hydrazine', amountMt: 0.0005 }, { material: 'Electricity', amountMt: 0.8 },
+		{ material: 'Electricity', amountMt: 0.8 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.0067 }, { material: 'LH₂', amountMt: 0.00133 },
+		{ material: 'Hydrazine', amountMt: 0.0000333 },
 	] },
-	'kourou':       { name: 'Guiana Space Centre',    items: [
+	'kourou':       { name: 'Guiana Space Centre',    maintenance: [
 		{ material: 'Steel', amountMt: 0.01 }, { material: 'Concrete / Cement', amountMt: 0.04 },
-		{ material: 'LOX', amountMt: 0.28 }, { material: 'LH₂', amountMt: 0.06 },
-		{ material: 'Hydrazine', amountMt: 0.0006 }, { material: 'Electricity', amountMt: 1.7 },
+		{ material: 'Electricity', amountMt: 1.7 },
 		{ material: 'Aluminum', amountMt: 0.003 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.0187 }, { material: 'LH₂', amountMt: 0.004 },
+		{ material: 'Hydrazine', amountMt: 0.00004 },
 	] },
-	'starbase':     { name: 'Starbase Boca Chica',    items: [
+	'starbase':     { name: 'Starbase Boca Chica',    maintenance: [
 		{ material: 'Steel', amountMt: 0.02 }, { material: 'Concrete / Cement', amountMt: 0.06 },
-		{ material: 'LOX', amountMt: 0.5 }, { material: 'LCH₄', amountMt: 0.25 },
 		{ material: 'Electricity', amountMt: 2.5 },
 		{ material: 'Copper', amountMt: 0.001 }, { material: 'Aluminum', amountMt: 0.005 },
+	], perLaunch: [
+		{ material: 'LOX', amountMt: 0.025 }, { material: 'LCH₄', amountMt: 0.0125 },
 	] },
 };
+
+// ── Rocket definitions & inventory ────────────────────────────────
+export interface RocketDef {
+	id: string;
+	name: string;
+	provider: string;
+	status: 'operational' | 'development';
+	payloadLEO: number;          // kg to LEO
+	payloadGTO: number;
+	payloadTLI: number;
+	fairingVolume_m3: number;
+	costPerLaunch: number;       // $M per launch
+	purchaseCostM: number;       // $M to buy one vehicle
+	reusable: boolean;
+	stages: number;
+	height: number;
+	diameter: number;
+	propellant: string;
+	thrust: number;              // kN total at liftoff
+	color: string;
+	shape: 'single' | 'triple' | 'wide-dual' | 'srb';
+	homeBase: string;            // launch complex id (manufacturing location)
+	globalInventory: number;     // how many exist in the world
+	// Annual maintenance per owned vehicle
+	maintenanceCostM: number;    // $M/yr per vehicle
+	maintenanceMaterials: { material: string; amountMt: number }[];
+}
+
+export const rocketDefs: RocketDef[] = [
+	{
+		id: 'starship', name: 'Starship / Super Heavy', provider: 'SpaceX',
+		status: 'operational', payloadLEO: 150000, payloadGTO: 21000, payloadTLI: 50000,
+		fairingVolume_m3: 1000, costPerLaunch: 10, purchaseCostM: 250, reusable: true,
+		stages: 2, height: 121, diameter: 9, propellant: 'LCH₄ / LOX', thrust: 74500,
+		color: '#3b82f6', shape: 'wide-dual', homeBase: 'starbase', globalInventory: 8,
+		maintenanceCostM: 15, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.0005 }, { material: 'Inconel / Superalloys', amountMt: 0.00008 },
+			{ material: 'Electricity', amountMt: 0.12 },
+		],
+	},
+	{
+		id: 'falcon-heavy', name: 'Falcon Heavy', provider: 'SpaceX',
+		status: 'operational', payloadLEO: 63800, payloadGTO: 26700, payloadTLI: 16000,
+		fairingVolume_m3: 145, costPerLaunch: 97, purchaseCostM: 180, reusable: true,
+		stages: 2, height: 70, diameter: 3.66, propellant: 'RP-1 / LOX', thrust: 22819,
+		color: '#60a5fa', shape: 'triple', homeBase: 'ksc-39a', globalInventory: 5,
+		maintenanceCostM: 12, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.0003 }, { material: 'Aluminum', amountMt: 0.00015 },
+			{ material: 'Electricity', amountMt: 0.06 },
+		],
+	},
+	{
+		id: 'falcon-9', name: 'Falcon 9 Block 5', provider: 'SpaceX',
+		status: 'operational', payloadLEO: 22800, payloadGTO: 8300, payloadTLI: 4020,
+		fairingVolume_m3: 145, costPerLaunch: 67, purchaseCostM: 120, reusable: true,
+		stages: 2, height: 70, diameter: 3.66, propellant: 'RP-1 / LOX', thrust: 7607,
+		color: '#93c5fd', shape: 'single', homeBase: 'ccafs-40', globalInventory: 18,
+		maintenanceCostM: 8, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.0002 }, { material: 'Aluminum', amountMt: 0.0001 },
+			{ material: 'Electricity', amountMt: 0.04 },
+		],
+	},
+	{
+		id: 'sls', name: 'SLS Block 2', provider: 'NASA / Boeing',
+		status: 'operational', payloadLEO: 130000, payloadGTO: 42000, payloadTLI: 46000,
+		fairingVolume_m3: 830, costPerLaunch: 2200, purchaseCostM: 2500, reusable: false,
+		stages: 2, height: 111, diameter: 8.4, propellant: 'LH₂ / LOX + SRBs', thrust: 39144,
+		color: '#f97316', shape: 'srb', homeBase: 'ksc-39a', globalInventory: 3,
+		maintenanceCostM: 85, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.001 }, { material: 'Concrete / Cement', amountMt: 0.002 },
+			{ material: 'Electricity', amountMt: 0.25 },
+		],
+	},
+	{
+		id: 'new-glenn', name: 'New Glenn', provider: 'Blue Origin',
+		status: 'operational', payloadLEO: 45000, payloadGTO: 13000, payloadTLI: 8000,
+		fairingVolume_m3: 400, costPerLaunch: 68, purchaseCostM: 200, reusable: true,
+		stages: 2, height: 98, diameter: 7, propellant: 'LCH₄ / LOX (S1) + LH₂ / LOX (S2)', thrust: 17100,
+		color: '#06b6d4', shape: 'wide-dual', homeBase: 'ccafs-40', globalInventory: 4,
+		maintenanceCostM: 14, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.0004 }, { material: 'Aluminum', amountMt: 0.0002 },
+			{ material: 'Electricity', amountMt: 0.08 },
+		],
+	},
+	{
+		id: 'vulcan', name: 'Vulcan Centaur', provider: 'ULA',
+		status: 'operational', payloadLEO: 27200, payloadGTO: 14400, payloadTLI: 7700,
+		fairingVolume_m3: 172, costPerLaunch: 110, purchaseCostM: 160, reusable: false,
+		stages: 2, height: 62, diameter: 5.4, propellant: 'LCH₄ / LOX + SRBs', thrust: 11060,
+		color: '#fbbf24', shape: 'srb', homeBase: 'ccafs-40', globalInventory: 6,
+		maintenanceCostM: 10, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.0002 }, { material: 'Aluminum', amountMt: 0.0001 },
+			{ material: 'Electricity', amountMt: 0.05 },
+		],
+	},
+	{
+		id: 'long-march-9', name: 'Long March 9', provider: 'CASC (China)',
+		status: 'operational', payloadLEO: 150000, payloadGTO: 50000, payloadTLI: 53000,
+		fairingVolume_m3: 900, costPerLaunch: 500, purchaseCostM: 800, reusable: false,
+		stages: 3, height: 114, diameter: 10.6, propellant: 'Kerolox (S1) + LH₂ / LOX (S2/S3)', thrust: 57840,
+		color: '#ef4444', shape: 'srb', homeBase: 'wenchang', globalInventory: 2,
+		maintenanceCostM: 45, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.0008 }, { material: 'Concrete / Cement', amountMt: 0.001 },
+			{ material: 'Electricity', amountMt: 0.18 },
+		],
+	},
+	{
+		id: 'ariane-6', name: 'Ariane 6 (A64)', provider: 'ArianeGroup (ESA)',
+		status: 'operational', payloadLEO: 21650, payloadGTO: 11500, payloadTLI: 4500,
+		fairingVolume_m3: 180, costPerLaunch: 115, purchaseCostM: 150, reusable: false,
+		stages: 2, height: 63, diameter: 5.4, propellant: 'LH₂ / LOX + SRBs', thrust: 8000,
+		color: '#8b5cf6', shape: 'srb', homeBase: 'kourou', globalInventory: 5,
+		maintenanceCostM: 9, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.00015 }, { material: 'Aluminum', amountMt: 0.0001 },
+			{ material: 'Electricity', amountMt: 0.04 },
+		],
+	},
+	{
+		id: 'neutron', name: 'Neutron', provider: 'Rocket Lab',
+		status: 'operational', payloadLEO: 13000, payloadGTO: 3000, payloadTLI: 1500,
+		fairingVolume_m3: 100, costPerLaunch: 50, purchaseCostM: 80, reusable: true,
+		stages: 2, height: 43, diameter: 4.6, propellant: 'LCH₄ / LOX', thrust: 6900,
+		color: '#10b981', shape: 'single', homeBase: 'vandenberg', globalInventory: 7,
+		maintenanceCostM: 5, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.0001 }, { material: 'Carbon Fiber', amountMt: 0.00005 },
+			{ material: 'Electricity', amountMt: 0.02 },
+		],
+	},
+	{
+		id: 'terran-r', name: 'Terran R', provider: 'Relativity Space',
+		status: 'development', payloadLEO: 33500, payloadGTO: 12000, payloadTLI: 5500,
+		fairingVolume_m3: 160, costPerLaunch: 55, purchaseCostM: 100, reusable: true,
+		stages: 2, height: 66, diameter: 5, propellant: 'LCH₄ / LOX', thrust: 11000,
+		color: '#a78bfa', shape: 'single', homeBase: 'ccafs-40', globalInventory: 1,
+		maintenanceCostM: 6, maintenanceMaterials: [
+			{ material: 'Steel', amountMt: 0.00012 }, { material: 'Inconel / Superalloys', amountMt: 0.00004 },
+			{ material: 'Electricity', amountMt: 0.03 },
+		],
+	},
+];
+
+// VenMars program rocket inventory: rocket id → count owned
+export const rocketInventory = writable<Record<string, number>>({});

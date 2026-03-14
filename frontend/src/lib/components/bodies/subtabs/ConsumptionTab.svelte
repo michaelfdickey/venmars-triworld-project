@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { claimedComplexes, launchComplexConsumption, materialDefs, materialAllocations, materialCostB as matCostBFn } from '$lib/stores/gameStore';
+	import { claimedComplexes, launchComplexConsumption, materialDefs, materialAllocations, materialCostB as matCostBFn, rocketDefs, rocketInventory } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -54,11 +54,12 @@
 	let consumptionByCategory = $derived.by(() => {
 		const map = new Map<number, MaterialDemandItem[]>();
 
-		// Add demands from claimed launch complexes
+		// Add maintenance demands from claimed launch complexes
+		// (propellant per-launch demands are not included until launches are scheduled)
 		for (const id of $claimedComplexes) {
 			const profile = launchComplexConsumption[id];
 			if (!profile) continue;
-			for (const item of profile.items) {
+			for (const item of profile.maintenance) {
 				const catIdx = materialToCatIndex[item.material] ?? 0;
 				if (!map.has(catIdx)) map.set(catIdx, []);
 				const matIdx = materialNameIndex.get(item.material);
@@ -67,6 +68,24 @@
 					name: profile.name,
 					material: item.material,
 					amountMt: item.amountMt,
+					color,
+				});
+			}
+		}
+
+		// Add maintenance demands from owned rockets (category 1 = Rocket Manufacturing)
+		for (const rocket of rocketDefs) {
+			const count = $rocketInventory[rocket.id] ?? 0;
+			if (count <= 0) continue;
+			for (const item of rocket.maintenanceMaterials) {
+				const catIdx = materialToCatIndex[item.material] ?? 1;
+				if (!map.has(catIdx)) map.set(catIdx, []);
+				const matIdx = materialNameIndex.get(item.material);
+				const color = matIdx !== undefined ? materialDefs[matIdx].color : '#888';
+				map.get(catIdx)!.push({
+					name: `${rocket.name} ×${count}`,
+					material: item.material,
+					amountMt: item.amountMt * count,
 					color,
 				});
 			}

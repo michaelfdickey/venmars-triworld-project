@@ -1,7 +1,7 @@
 <script lang="ts">
 	let { bodyId }: { bodyId: string } = $props();
 
-	type Category = 'raw' | 'compound' | 'specialty' | 'facility';
+	type Category = 'raw' | 'structural' | 'compound' | 'specialty' | 'facility';
 
 	interface Material {
 		name: string;
@@ -15,6 +15,7 @@
 
 	const categoryLabels: Record<Category, string> = {
 		raw: 'Raw Materials',
+		structural: 'Structural & Industrial',
 		compound: 'Compounds & Propellants',
 		specialty: 'Specialty Components',
 		facility: 'Facilities',
@@ -22,6 +23,7 @@
 
 	const categoryIcons: Record<Category, string> = {
 		raw: '⛏️',
+		structural: '🏗️',
 		compound: '⚗️',
 		specialty: '🛡️',
 		facility: '🏭',
@@ -29,38 +31,55 @@
 
 	const materialData: Record<string, Material[]> = {
 		earth: [
-			{ name: 'Iron Ore', icon: '🪨', category: 'raw', stockpile: 500000, unit: 't', rate: '+2,400 t/day', available: true },
-			{ name: 'Aluminum Ore (Bauxite)', icon: '🪨', category: 'raw', stockpile: 180000, unit: 't', rate: '+800 t/day', available: true },
-			{ name: 'Titanium Ore (Rutile)', icon: '🪨', category: 'raw', stockpile: 24000, unit: 't', rate: '+60 t/day', available: true },
-			{ name: 'Silicon (Raw)', icon: '🔲', category: 'raw', stockpile: 90000, unit: 't', rate: '+300 t/day', available: true },
-			{ name: 'Rare Earth Ore', icon: '💎', category: 'raw', stockpile: 5200, unit: 't', rate: '+12 t/day', available: true },
-			{ name: 'Water (Purified)', icon: '💧', category: 'raw', stockpile: 1200000, unit: 'L', rate: 'unlimited', available: true },
+			// Raw ores & feedstock
+			{ name: 'Iron Ore', icon: '🪨', category: 'raw', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Bauxite (Aluminum Ore)', icon: '🪨', category: 'raw', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Copper Ore', icon: '🪨', category: 'raw', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Rutile (Titanium Ore)', icon: '🪨', category: 'raw', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Nickel Ore', icon: '🪨', category: 'raw', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Silicon (Raw)', icon: '🔲', category: 'raw', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Rare Earth Ore', icon: '💎', category: 'raw', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Limestone / Clinite', icon: '🪨', category: 'raw', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Water (Purified)', icon: '💧', category: 'raw', stockpile: 0, unit: 'L', rate: 'unlimited', available: true },
 
-			{ name: 'Liquid Hydrogen (LH₂)', icon: '🧪', category: 'compound', stockpile: 8400, unit: 't', rate: '+45 t/day', available: true },
-			{ name: 'Liquid Oxygen (LOX)', icon: '🧪', category: 'compound', stockpile: 32000, unit: 't', rate: '+180 t/day', available: true },
-			{ name: 'Liquid Methane (LCH₄)', icon: '🧪', category: 'compound', stockpile: 12500, unit: 't', rate: '+80 t/day', available: true },
-			{ name: 'Liquid Nitrogen (LN₂)', icon: '🧊', category: 'compound', stockpile: 18000, unit: 't', rate: '+120 t/day', available: true },
-			{ name: 'RP-1 Kerosene', icon: '🛢️', category: 'compound', stockpile: 15000, unit: 't', rate: '+60 t/day', available: true },
-			{ name: 'Hydrazine (N₂H₄)', icon: '⚠️', category: 'compound', stockpile: 420, unit: 't', rate: '+3 t/day', available: true },
-			{ name: 'Nitrogen Tetroxide (NTO)', icon: '⚠️', category: 'compound', stockpile: 380, unit: 't', rate: '+2.5 t/day', available: true },
-			{ name: 'Xenon (Ion Thruster)', icon: '💨', category: 'compound', stockpile: 85, unit: 't', rate: '+0.4 t/day', available: true },
+			// Structural & industrial materials (match materialDefs)
+			{ name: 'Steel', icon: '🔩', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Aluminum', icon: '🪶', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Copper (Refined)', icon: '🔶', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Titanium', icon: '⚙️', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Nickel', icon: '🔧', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Silicon (Electronic)', icon: '💠', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Rare Earth Elements', icon: '💎', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Carbon Fiber', icon: '🧱', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Inconel / Superalloys', icon: '🔥', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Concrete / Cement', icon: '🏗️', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
 
-			{ name: 'Aerospace-Grade Stainless (304L)', icon: '🔩', category: 'specialty', stockpile: 6200, unit: 't', rate: '+28 t/day', available: true },
-			{ name: 'Carbon Fiber Composite', icon: '🧱', category: 'specialty', stockpile: 1800, unit: 't', rate: '+8 t/day', available: true },
-			{ name: 'COPV Tanks', icon: '🫧', category: 'specialty', stockpile: 340, unit: 'units', rate: '+4 /day', available: true },
-			{ name: 'Thermal Protection Tiles (PICA-X)', icon: '🛡️', category: 'specialty', stockpile: 28000, unit: 'tiles', rate: '+120 /day', available: true },
-			{ name: 'Ablative Heat Shield Panels', icon: '🛡️', category: 'specialty', stockpile: 4500, unit: 'panels', rate: '+18 /day', available: true },
-			{ name: 'Inconel Alloy', icon: '🔧', category: 'specialty', stockpile: 780, unit: 't', rate: '+3 t/day', available: true },
-			{ name: 'Titanium Alloy (Ti-6Al-4V)', icon: '🔧', category: 'specialty', stockpile: 1450, unit: 't', rate: '+6 t/day', available: true },
-			{ name: 'Solar Cell Panels', icon: '☀️', category: 'specialty', stockpile: 12000, unit: 'm²', rate: '+50 m²/day', available: true },
-			{ name: 'Superconducting Magnets', icon: '🧲', category: 'specialty', stockpile: 48, unit: 'units', rate: '+0.2 /day', available: true },
-			{ name: 'Avionics Modules', icon: '📡', category: 'specialty', stockpile: 160, unit: 'units', rate: '+2 /day', available: true },
-			{ name: 'Raptor / Merlin Engines', icon: '🔥', category: 'specialty', stockpile: 64, unit: 'engines', rate: '+0.5 /day', available: true },
+			// Compounds & propellants (match materialDefs)
+			{ name: 'Liquid Oxygen (LOX)', icon: '🧪', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Liquid Hydrogen (LH₂)', icon: '🧪', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Liquid Methane (LCH₄)', icon: '🧪', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'RP-1 Kerosene', icon: '🛢️', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Hydrazine (N₂H₄)', icon: '⚠️', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Xenon', icon: '💨', category: 'compound', stockpile: 0, unit: 'kg', rate: '—', available: true },
+			{ name: 'Nitrogen Tetroxide (NTO)', icon: '⚠️', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Liquid Nitrogen (LN₂)', icon: '🧊', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
 
-			{ name: 'Chemical Launch Pads', icon: '🚀', category: 'facility', stockpile: 5, unit: 'pads', rate: '50 launches/yr', available: true },
-			{ name: 'Payload Integration Bays', icon: '📦', category: 'facility', stockpile: 3, unit: 'bays', rate: '150t max/launch', available: true },
-			{ name: 'Mission Control Centers', icon: '🖥️', category: 'facility', stockpile: 2, unit: 'centers', rate: '12 concurrent ops', available: true },
-			{ name: 'Propellant Plants', icon: '🏭', category: 'facility', stockpile: 4, unit: 'plants', rate: 'see compounds', available: true },
+			// Specialty components & assemblies
+			{ name: 'Aerospace Stainless (304L)', icon: '🔩', category: 'specialty', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Titanium Alloy (Ti-6Al-4V)', icon: '🔧', category: 'specialty', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'COPV Tanks', icon: '🫧', category: 'specialty', stockpile: 0, unit: 'units', rate: '—', available: true },
+			{ name: 'Thermal Protection Tiles', icon: '🛡️', category: 'specialty', stockpile: 0, unit: 'tiles', rate: '—', available: true },
+			{ name: 'Ablative Heat Shield Panels', icon: '🛡️', category: 'specialty', stockpile: 0, unit: 'panels', rate: '—', available: true },
+			{ name: 'Solar Cell Panels', icon: '☀️', category: 'specialty', stockpile: 0, unit: 'm²', rate: '—', available: true },
+			{ name: 'Superconducting Magnets', icon: '🧲', category: 'specialty', stockpile: 0, unit: 'units', rate: '—', available: true },
+			{ name: 'Avionics Modules', icon: '📡', category: 'specialty', stockpile: 0, unit: 'units', rate: '—', available: true },
+			{ name: 'Raptor / Merlin Engines', icon: '🔥', category: 'specialty', stockpile: 0, unit: 'engines', rate: '—', available: true },
+
+			// Facilities
+			{ name: 'Chemical Launch Pads', icon: '🚀', category: 'facility', stockpile: 0, unit: 'pads', rate: '—', available: true },
+			{ name: 'Payload Integration Bays', icon: '📦', category: 'facility', stockpile: 0, unit: 'bays', rate: '—', available: true },
+			{ name: 'Mission Control Centers', icon: '🖥️', category: 'facility', stockpile: 0, unit: 'centers', rate: '—', available: true },
+			{ name: 'Propellant Plants', icon: '🏭', category: 'facility', stockpile: 0, unit: 'plants', rate: '—', available: true },
 		],
 		moon: [
 			{ name: 'Regolith', icon: '🪨', category: 'raw', stockpile: 0, unit: 't', rate: '0 t/day', available: false },
@@ -143,7 +162,7 @@
 		],
 	};
 
-	const categories: Category[] = ['raw', 'compound', 'specialty', 'facility'];
+	const categories: Category[] = ['raw', 'structural', 'compound', 'specialty', 'facility'];
 
 	let materials = $derived(materialData[bodyId] ?? []);
 	let grouped = $derived(

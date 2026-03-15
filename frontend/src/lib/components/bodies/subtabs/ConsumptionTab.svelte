@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { claimedComplexes, launchComplexConsumption, materialDefs, materialAllocations, materialCostB as matCostBFn, rocketDefs, rocketInventory } from '$lib/stores/gameStore';
+	import { claimedComplexes, launchComplexProfiles, materialDefs, materialAllocations, materialCostB as matCostBFn, rocketDefs, rocketInventory } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -54,12 +54,14 @@
 	let consumptionByCategory = $derived.by(() => {
 		const map = new Map<number, MaterialDemandItem[]>();
 
-		// Add maintenance demands from claimed launch complexes
-		// (propellant per-launch demands are not included until launches are scheduled)
+		// Add idle maintenance demands from claimed launch complexes
+		// (no launches are currently scheduled, so complexes are idle)
 		for (const id of $claimedComplexes) {
-			const profile = launchComplexConsumption[id];
+			const profile = launchComplexProfiles[id];
 			if (!profile) continue;
-			for (const item of profile.maintenance) {
+			const state = profile.idle;
+			// Add material demands (profile values are in kt-scale, divide by 1000 for Mt)
+			for (const item of state.materials) {
 				const catIdx = materialToCatIndex[item.material] ?? 0;
 				if (!map.has(catIdx)) map.set(catIdx, []);
 				const matIdx = materialNameIndex.get(item.material);
@@ -67,7 +69,20 @@
 				map.get(catIdx)!.push({
 					name: profile.name,
 					material: item.material,
-					amountMt: item.amountMt,
+					amountMt: item.amountMt / 1000,
+					color,
+				});
+			}
+			// Add electricity demand (TWh is already correct scale)
+			if (state.electricityTWh > 0) {
+				const catIdx = materialToCatIndex['Electricity'] ?? 10;
+				if (!map.has(catIdx)) map.set(catIdx, []);
+				const matIdx = materialNameIndex.get('Electricity');
+				const color = matIdx !== undefined ? materialDefs[matIdx].color : '#facc15';
+				map.get(catIdx)!.push({
+					name: profile.name,
+					material: 'Electricity',
+					amountMt: state.electricityTWh,
 					color,
 				});
 			}

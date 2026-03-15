@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { difficulty, difficultyConfig, spendingAllocations, spendingReserves, claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory } from '$lib/stores/gameStore';
+	import { difficulty, difficultyConfig, spendingAllocations, spendingReserves, claimedComplexes, launchComplexProfiles, rocketDefs, rocketInventory } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -50,9 +50,10 @@
 		const colors = ['#fb923c', '#fdba74', '#fed7aa', '#fef3c7', '#fde68a', '#fcd34d', '#fbbf24', '#f59e0b', '#d97706', '#b45309'];
 		let ci = 0;
 		for (const id of $claimedComplexes) {
-			const info = launchComplexCosts[id];
-			if (info) {
-				items.push({ name: info.name, costB: info.costM / 1000, color: colors[ci % colors.length] });
+			const profile = launchComplexProfiles[id];
+			if (profile) {
+				// Use idle cost since no launches are scheduled yet
+				items.push({ name: profile.name, costB: profile.idle.costM / 1000, color: colors[ci % colors.length] });
 				ci++;
 			}
 		}

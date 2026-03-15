@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { activeTab, gameState } from '$lib/stores/gameStore';
+	import { onMount } from 'svelte';
+	import { activeTab, gameState, gameTime, simSpeed } from '$lib/stores/gameStore';
 	import TabBar from './TabBar.svelte';
 	import BodyPanel from './bodies/BodyPanel.svelte';
 	import SettingsPanel from './SettingsPanel.svelte';
@@ -12,6 +13,37 @@
 		mars: 'mars',
 		asteroids: 'asteroids'
 	};
+
+	// Simulation loop
+	let rafId: number;
+	let lastTime = 0;
+	let currentSpeed = 0;
+
+	const unsub = simSpeed.subscribe(v => { currentSpeed = v; });
+
+	onMount(() => {
+		lastTime = performance.now();
+
+		function loop(now: number) {
+			const dtMs = now - lastTime;
+			lastTime = now;
+
+			if (currentSpeed > 0) {
+				const dtSeconds = dtMs / 1000;
+				const deltaHours = currentSpeed * dtSeconds;
+				gameTime.update(t => t + deltaHours);
+			}
+
+			rafId = requestAnimationFrame(loop);
+		}
+
+		rafId = requestAnimationFrame(loop);
+
+		return () => {
+			cancelAnimationFrame(rafId);
+			unsub();
+		};
+	});
 </script>
 
 <div class="flex flex-col h-screen">

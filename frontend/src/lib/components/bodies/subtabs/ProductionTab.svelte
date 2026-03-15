@@ -1,7 +1,6 @@
 <script lang="ts">
 	import AllocationTab from './production/AllocationTab.svelte';
 	import PipelinesTab from './production/PipelinesTab.svelte';
-	import GlobalOutputTab from './production/GlobalOutputTab.svelte';
 	import InventoryTab from './production/InventoryTab.svelte';
 
 	let { bodyId }: { bodyId: string } = $props();
@@ -9,9 +8,8 @@
 	let activeProductionTab = $state('allocation');
 
 	const prodSubTabs = [
-		{ id: 'allocation', label: 'Allocation' },
-		{ id: 'pipelines', label: 'Pipelines' },
-		{ id: 'global-output', label: 'Global Output' },
+		{ id: 'allocation', label: 'Global Allocation' },
+		{ id: 'pipelines', label: 'VenMars Production' },
 		{ id: 'inventory', label: 'Inventory' },
 	];
 </script>
@@ -38,8 +36,6 @@
 			<AllocationTab {bodyId} />
 		{:else if activeProductionTab === 'pipelines'}
 			<PipelinesTab {bodyId} />
-		{:else if activeProductionTab === 'global-output'}
-			<GlobalOutputTab {bodyId} />
 		{:else if activeProductionTab === 'inventory'}
 			<InventoryTab {bodyId} />
 		{/if}

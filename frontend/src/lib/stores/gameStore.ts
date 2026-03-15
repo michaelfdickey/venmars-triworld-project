@@ -1,9 +1,47 @@
-import { writable } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
 
 export type GameScreen = 'title' | 'playing';
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
 export const difficulty = writable<Difficulty>('medium');
+
+// ── Simulation clock ─────────────────────────────────────────────
+// Game epoch: Jan 1 2030 00:00 UTC.  gameTime = hours elapsed since epoch.
+export const GAME_EPOCH = new Date(Date.UTC(2030, 0, 1, 0, 0, 0));
+
+export const gameTime = writable<number>(0); // hours since epoch
+
+export interface SpeedPreset {
+	id: string;
+	label: string;
+	hoursPerSecond: number; // 0 = paused
+}
+
+export const speedPresets: SpeedPreset[] = [
+	{ id: 'paused',    label: '⏸ Paused',    hoursPerSecond: 0 },
+	{ id: 'realtime',  label: '▶ Real Time', hoursPerSecond: 1 / 3600 },  // 1 real-second = 1 game-second
+	{ id: '1min',      label: '⏩ 1 min/f',   hoursPerSecond: 1 / 60 * 60 },  // 1 minute per frame @ 60fps → 60 min/s = 1 hr/s
+];
+
+export const simSpeedIndex = writable<number>(0); // index into speedPresets, default paused
+export const simSpeed = derived(simSpeedIndex, idx => speedPresets[idx]?.hoursPerSecond ?? 0);
+
+// Derive a calendar date from gameTime
+export function gameTimeToDate(hours: number): Date {
+	return new Date(GAME_EPOCH.getTime() + hours * 3600_000);
+}
+
+// Format: "2030.01.01:00000:00"  →  YYYY.MM.DD:TTTTT:HH
+// TTTTT = total hours elapsed, HH = hour of day
+export function formatGameTimestamp(hours: number): string {
+	const d = gameTimeToDate(hours);
+	const yyyy = d.getUTCFullYear();
+	const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+	const dd = String(d.getUTCDate()).padStart(2, '0');
+	const totalHrs = Math.floor(hours);
+	const hourOfDay = String(d.getUTCHours()).padStart(2, '0');
+	return `${yyyy}.${mm}.${dd}:${String(totalHrs).padStart(5, '0')}:${hourOfDay}`;
+}
 
 export const difficultyConfig: Record<Difficulty, {
 	label: string;

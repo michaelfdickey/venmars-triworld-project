@@ -1,17 +1,23 @@
 <script lang="ts">
-	import { gameState } from '$lib/stores/gameStore';
+	import { gameState, gameTime, simSpeedIndex, speedPresets, formatGameTimestamp } from '$lib/stores/gameStore';
 
 	let state = $derived($gameState);
-	let year = $derived(state?.year ?? 2040);
+	let timestamp = $derived(formatGameTimestamp($gameTime));
+	let currentPreset = $derived(speedPresets[$simSpeedIndex]);
+	let isPaused = $derived($simSpeedIndex === 0);
+
+	function setSpeed(index: number) {
+		$simSpeedIndex = index;
+	}
 </script>
 
-<div class="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-panel)] border-b border-[var(--color-border)] text-sm">
-	<div class="flex items-center gap-6">
-		<span class="font-bold text-[var(--color-accent-earth)]">VenMars</span>
-		<span class="text-[var(--color-text-dim)]">Year: <span class="text-[var(--color-text)] font-mono">{year.toFixed(1)}</span></span>
+<div class="status-bar">
+	<div class="status-left">
+		<span class="status-brand">VenMars</span>
+		<span class="status-clock">{timestamp}</span>
 	</div>
 
-	<div class="flex items-center gap-6">
+	<div class="status-right">
 		<!-- Milestone indicators -->
 		<div class="flex items-center gap-3 text-xs">
 			<span class="flex items-center gap-1" title="Lunar Mass Driver">
@@ -29,11 +35,82 @@
 		</div>
 
 		<!-- Speed controls -->
-		<div class="flex items-center gap-2">
-			<button class="px-2 py-0.5 rounded bg-[var(--color-bg-card)] hover:bg-[var(--color-border)] text-xs cursor-pointer">⏸</button>
-			<button class="px-2 py-0.5 rounded bg-[var(--color-bg-card)] hover:bg-[var(--color-border)] text-xs cursor-pointer">1×</button>
-			<button class="px-2 py-0.5 rounded bg-[var(--color-bg-card)] hover:bg-[var(--color-border)] text-xs cursor-pointer">10×</button>
-			<button class="px-2 py-0.5 rounded bg-[var(--color-bg-card)] hover:bg-[var(--color-border)] text-xs cursor-pointer">100×</button>
+		<div class="speed-controls">
+			{#each speedPresets as preset, i}
+				<button
+					class="speed-btn"
+					class:active={$simSpeedIndex === i}
+					onclick={() => setSpeed(i)}
+				>
+					{preset.label}
+				</button>
+			{/each}
 		</div>
 	</div>
 </div>
+
+<style>
+	.status-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0.35rem 1rem;
+		background: var(--color-bg-panel);
+		border-bottom: 1px solid var(--color-border);
+		font-size: 0.85rem;
+	}
+
+	.status-left {
+		display: flex;
+		align-items: center;
+		gap: 1.5rem;
+	}
+
+	.status-brand {
+		font-weight: 700;
+		color: var(--color-accent-earth);
+		font-size: 0.9rem;
+	}
+
+	.status-clock {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--color-text);
+		letter-spacing: 0.04em;
+	}
+
+	.status-right {
+		display: flex;
+		align-items: center;
+		gap: 1.5rem;
+	}
+
+	.speed-controls {
+		display: flex;
+		gap: 0.25rem;
+	}
+
+	.speed-btn {
+		padding: 0.2rem 0.5rem;
+		border-radius: 0.25rem;
+		border: 1px solid var(--color-border);
+		background: var(--color-bg-card);
+		color: var(--color-text-dim);
+		font-size: 0.7rem;
+		cursor: pointer;
+		transition: all 0.1s;
+		white-space: nowrap;
+	}
+
+	.speed-btn:hover {
+		background: var(--color-border);
+		color: var(--color-text);
+	}
+
+	.speed-btn.active {
+		background: var(--color-accent-earth);
+		color: #fff;
+		border-color: var(--color-accent-earth);
+	}
+</style>

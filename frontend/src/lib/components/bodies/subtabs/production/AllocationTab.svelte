@@ -9,27 +9,34 @@
 		globalProductionPerYear: string;
 		maxPercent: number;
 		aerospace: boolean;
+		annualOutput: string;
+		dailyOutput: string;
+		trend: 'up' | 'flat' | 'down';
+		topProducers: string;
 	}
 
 	const materials: MaterialDisplay[] = [
-		{ name: 'Steel', icon: '🔩', globalProductionPerYear: '1,950 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'Aluminum', icon: '🪶', globalProductionPerYear: '70 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'Copper', icon: '🔶', globalProductionPerYear: '25 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'Titanium', icon: '⚙️', globalProductionPerYear: '0.24 Mt', maxPercent: 100, aerospace: true },
-		{ name: 'Nickel', icon: '🔧', globalProductionPerYear: '3.3 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'Silicon (Electronic)', icon: '🔲', globalProductionPerYear: '0.6 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'Rare Earth Elements', icon: '💎', globalProductionPerYear: '0.35 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'Carbon Fiber', icon: '🧱', globalProductionPerYear: '0.18 Mt', maxPercent: 100, aerospace: true },
-		{ name: 'Inconel / Superalloys', icon: '🔥', globalProductionPerYear: '0.08 Mt', maxPercent: 100, aerospace: true },
-		{ name: 'Concrete / Cement', icon: '🧱', globalProductionPerYear: '4,100 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'LOX', icon: '🧪', globalProductionPerYear: '450 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'LH₂', icon: '🧪', globalProductionPerYear: '94 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'LCH₄', icon: '🧪', globalProductionPerYear: '180 Mt', maxPercent: 10, aerospace: false },
-		{ name: 'RP-1 Kerosene', icon: '🛢️', globalProductionPerYear: '0.05 Mt', maxPercent: 100, aerospace: true },
-		{ name: 'Hydrazine', icon: '⚠️', globalProductionPerYear: '0.03 Mt', maxPercent: 100, aerospace: true },
-		{ name: 'Xenon', icon: '💨', globalProductionPerYear: '0.00004 Mt', maxPercent: 100, aerospace: true },
-		{ name: 'Electricity', icon: '⚡', globalProductionPerYear: '29,000 TWh', maxPercent: 10, aerospace: false },
+		{ name: 'Steel', icon: '🔩', globalProductionPerYear: '1,950 Mt', maxPercent: 10, aerospace: false, annualOutput: '1,950 Mt', dailyOutput: '5,342 Mt/d', trend: 'flat', topProducers: 'China, India, Japan' },
+		{ name: 'Aluminum', icon: '🪶', globalProductionPerYear: '70 Mt', maxPercent: 10, aerospace: false, annualOutput: '70 Mt', dailyOutput: '192 kt/d', trend: 'up', topProducers: 'China, India, Russia' },
+		{ name: 'Copper', icon: '🔶', globalProductionPerYear: '25 Mt', maxPercent: 10, aerospace: false, annualOutput: '25 Mt', dailyOutput: '68 kt/d', trend: 'flat', topProducers: 'Chile, China, Congo' },
+		{ name: 'Titanium', icon: '⚙️', globalProductionPerYear: '0.24 Mt', maxPercent: 100, aerospace: true, annualOutput: '0.24 Mt', dailyOutput: '660 t/d', trend: 'up', topProducers: 'China, Japan, Russia' },
+		{ name: 'Nickel', icon: '🔧', globalProductionPerYear: '3.3 Mt', maxPercent: 10, aerospace: false, annualOutput: '3.3 Mt', dailyOutput: '9 kt/d', trend: 'up', topProducers: 'Indonesia, Philippines, Russia' },
+		{ name: 'Silicon (Electronic)', icon: '🔲', globalProductionPerYear: '0.6 Mt', maxPercent: 10, aerospace: false, annualOutput: '0.6 Mt', dailyOutput: '1.6 kt/d', trend: 'up', topProducers: 'China, Japan, S.Korea' },
+		{ name: 'Rare Earth Elements', icon: '💎', globalProductionPerYear: '0.35 Mt', maxPercent: 10, aerospace: false, annualOutput: '0.35 Mt', dailyOutput: '960 t/d', trend: 'up', topProducers: 'China, Myanmar, Australia' },
+		{ name: 'Carbon Fiber', icon: '🧱', globalProductionPerYear: '0.18 Mt', maxPercent: 100, aerospace: true, annualOutput: '0.18 Mt', dailyOutput: '490 t/d', trend: 'up', topProducers: 'Japan, USA, China' },
+		{ name: 'Inconel / Superalloys', icon: '🔥', globalProductionPerYear: '0.08 Mt', maxPercent: 100, aerospace: true, annualOutput: '0.08 Mt', dailyOutput: '220 t/d', trend: 'flat', topProducers: 'USA, UK, Germany' },
+		{ name: 'Concrete / Cement', icon: '🧱', globalProductionPerYear: '4,100 Mt', maxPercent: 10, aerospace: false, annualOutput: '4,100 Mt', dailyOutput: '11,233 Mt/d', trend: 'flat', topProducers: 'China, India, Vietnam' },
+		{ name: 'LOX', icon: '🧪', globalProductionPerYear: '450 Mt', maxPercent: 10, aerospace: false, annualOutput: '450 Mt', dailyOutput: '1,233 kt/d', trend: 'up', topProducers: 'Global (air separation)' },
+		{ name: 'LH₂', icon: '🧪', globalProductionPerYear: '94 Mt', maxPercent: 10, aerospace: false, annualOutput: '94 Mt', dailyOutput: '257 kt/d', trend: 'up', topProducers: 'China, USA, EU' },
+		{ name: 'LCH₄', icon: '🧪', globalProductionPerYear: '180 Mt', maxPercent: 10, aerospace: false, annualOutput: '180 Mt', dailyOutput: '493 kt/d', trend: 'flat', topProducers: 'USA, Russia, Iran' },
+		{ name: 'RP-1 Kerosene', icon: '🛢️', globalProductionPerYear: '0.05 Mt', maxPercent: 100, aerospace: true, annualOutput: '0.05 Mt', dailyOutput: '137 t/d', trend: 'flat', topProducers: 'USA, Russia' },
+		{ name: 'Hydrazine', icon: '⚠️', globalProductionPerYear: '0.03 Mt', maxPercent: 100, aerospace: true, annualOutput: '0.03 Mt', dailyOutput: '82 t/d', trend: 'flat', topProducers: 'USA, Japan, France' },
+		{ name: 'Xenon', icon: '💨', globalProductionPerYear: '0.00004 Mt', maxPercent: 100, aerospace: true, annualOutput: '40 t', dailyOutput: '110 kg/d', trend: 'flat', topProducers: 'Global (air separation)' },
+		{ name: 'Electricity', icon: '⚡', globalProductionPerYear: '29,000 TWh', maxPercent: 10, aerospace: false, annualOutput: '29,000 TWh', dailyOutput: '79.5 TWh/d', trend: 'up', topProducers: 'China, USA, India' },
 	];
+
+	const trendIcon: Record<string, string> = { up: '↑', flat: '→', down: '↓' };
+	const trendColor: Record<string, string> = { up: '#4ade80', flat: '#fbbf24', down: '#ef4444' };
 
 	let allocations = $derived($materialAllocations);
 	let annualBudget = $derived(difficultyConfig[$difficulty].annualBudgetB);
@@ -136,47 +143,63 @@
 	</div>
 
 	<div class="alloc-list">
+		<!-- Column headers -->
+		<div class="alloc-col-headers">
+			<span class="ach-alloc">Material &amp; Allocation</span>
+			<span class="ach-val">Annual</span>
+			<span class="ach-val">Daily</span>
+			<span class="ach-val ach-trend">Trend</span>
+			<span class="ach-prod">Top Producers</span>
+		</div>
 		{#each materials as mat, i}
 			<div class="alloc-row" class:aerospace={mat.aerospace}>
-				<div class="alloc-top-row">
-					<span class="alloc-icon">{mat.icon}</span>
-					<div class="alloc-info">
-						<span class="alloc-name">
-							{mat.name}
-							{#if mat.aerospace}
-								<span class="aero-badge">AEROSPACE</span>
-							{/if}
-						</span>
-						<span class="alloc-global">Global: {mat.globalProductionPerYear}/yr · Procuring: {materialTonnage(i)}</span>
+				<div class="alloc-main">
+					<div class="alloc-top-row">
+						<span class="alloc-icon">{mat.icon}</span>
+						<div class="alloc-info">
+							<span class="alloc-name">
+								{mat.name}
+								{#if mat.aerospace}
+									<span class="aero-badge">AEROSPACE</span>
+								{/if}
+							</span>
+							<span class="alloc-global">Global: {mat.globalProductionPerYear}/yr · Procuring: {materialTonnage(i)}</span>
+						</div>
+						<div class="alloc-cost-wrap">
+							<span class="alloc-dollar">$</span>
+							<input
+								class="alloc-cost-input"
+								type="number"
+								min="0"
+								step="0.1"
+								value={formatB(materialCostBLocal(i))}
+								oninput={(e) => handleCostInput(i, e)}
+							/>
+							<span class="alloc-unit">B</span>
+						</div>
 					</div>
-					<div class="alloc-cost-wrap">
-						<span class="alloc-dollar">$</span>
-						<input
-							class="alloc-cost-input"
-							type="number"
-							min="0"
-							step="0.1"
-							value={formatB(materialCostBLocal(i))}
-							oninput={(e) => handleCostInput(i, e)}
-						/>
-						<span class="alloc-unit">B</span>
+					<div class="alloc-slider-row">
+						<span class="alloc-pct-label">{allocations[i].toFixed(1)}%</span>
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="alloc-bar-track"
+							onpointerdown={(e) => startDrag(i, e)}
+							onpointermove={(e) => onDragMove(i, e)}
+							onpointerup={endDrag}
+							onpointercancel={endDrag}
+						>
+							<div class="alloc-bar-fill" class:aerospace-bar={mat.aerospace}
+								style="width: {(allocations[i] / mat.maxPercent) * 100}%; background: {materialDefs[i].color}"></div>
+							<div class="alloc-bar-thumb" style="left: {(allocations[i] / mat.maxPercent) * 100}%; background: {materialDefs[i].color}"></div>
+						</div>
+						<span class="alloc-cap">{mat.maxPercent}%</span>
 					</div>
 				</div>
-				<div class="alloc-slider-row">
-					<span class="alloc-pct-label">{allocations[i].toFixed(1)}%</span>
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div
-						class="alloc-bar-track"
-						onpointerdown={(e) => startDrag(i, e)}
-						onpointermove={(e) => onDragMove(i, e)}
-						onpointerup={endDrag}
-						onpointercancel={endDrag}
-					>
-						<div class="alloc-bar-fill" class:aerospace-bar={mat.aerospace}
-							style="width: {(allocations[i] / mat.maxPercent) * 100}%; background: {materialDefs[i].color}"></div>
-						<div class="alloc-bar-thumb" style="left: {(allocations[i] / mat.maxPercent) * 100}%; background: {materialDefs[i].color}"></div>
-					</div>
-					<span class="alloc-cap">{mat.maxPercent}%</span>
+				<div class="alloc-global-cols">
+					<span class="agc-val">{mat.annualOutput}</span>
+					<span class="agc-val">{mat.dailyOutput}</span>
+					<span class="agc-trend" style="color: {trendColor[mat.trend]}">{trendIcon[mat.trend]}</span>
+					<span class="agc-prod">{mat.topProducers}</span>
 				</div>
 			</div>
 		{/each}
@@ -276,6 +299,9 @@
 	}
 
 	.alloc-row {
+		display: flex;
+		gap: 0.5rem;
+		align-items: stretch;
 		padding: 0.5rem 0.6rem;
 		border-radius: 0.4rem;
 		border: 1px solid var(--color-border);
@@ -284,6 +310,83 @@
 
 	.alloc-row.aerospace {
 		border-color: rgba(96, 165, 250, 0.3);
+	}
+
+	.alloc-main {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.alloc-global-cols {
+		display: grid;
+		grid-template-columns: 5.5rem 5.5rem 1.8rem 1fr;
+		gap: 0.25rem;
+		align-items: center;
+		flex-shrink: 0;
+		border-left: 1px solid var(--color-border);
+		padding-left: 0.5rem;
+		min-width: 260px;
+	}
+
+	.agc-val {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.65rem;
+		font-weight: 600;
+		color: var(--color-text);
+		text-align: right;
+		white-space: nowrap;
+	}
+
+	.agc-trend {
+		text-align: center;
+		font-weight: 700;
+		font-size: 0.8rem;
+	}
+
+	.agc-prod {
+		font-size: 0.6rem;
+		color: var(--color-text-dim);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	/* Column headers */
+	.alloc-col-headers {
+		display: flex;
+		gap: 0.5rem;
+		padding: 0.3rem 0.6rem;
+		font-size: 0.6rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--color-text-dim);
+	}
+
+	.ach-alloc {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.ach-val {
+		width: 5.5rem;
+		text-align: right;
+		flex-shrink: 0;
+	}
+
+	.ach-trend {
+		width: 1.8rem;
+		text-align: center;
+	}
+
+	.ach-prod {
+		flex-shrink: 0;
+		min-width: 0;
+		/* Align with agc-prod — offset for border-left + padding */
+		padding-left: 0.5rem;
+		border-left: 1px solid transparent;
 	}
 
 	.alloc-top-row {

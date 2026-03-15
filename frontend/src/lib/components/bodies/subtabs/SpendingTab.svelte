@@ -249,13 +249,18 @@
 			const endAngle = cumAngle + angle;
 			const midAngle = startAngle + angle / 2;
 
-			// SVG arc path
-			const x1 = PIE_CX + PIE_R * Math.cos(startAngle);
-			const y1 = PIE_CY + PIE_R * Math.sin(startAngle);
-			const x2 = PIE_CX + PIE_R * Math.cos(endAngle);
-			const y2 = PIE_CY + PIE_R * Math.sin(endAngle);
-			const largeArc = angle > Math.PI ? 1 : 0;
-			const path = `M${PIE_CX},${PIE_CY} L${x1},${y1} A${PIE_R},${PIE_R} 0 ${largeArc} 1 ${x2},${y2} Z`;
+			// SVG arc path — full circle needs two half-arcs since a single arc with same start/end collapses
+			let path: string;
+			if (pct >= 1) {
+				path = `M${PIE_CX},${PIE_CY - PIE_R} A${PIE_R},${PIE_R} 0 1 1 ${PIE_CX},${PIE_CY + PIE_R} A${PIE_R},${PIE_R} 0 1 1 ${PIE_CX},${PIE_CY - PIE_R} Z`;
+			} else {
+				const x1 = PIE_CX + PIE_R * Math.cos(startAngle);
+				const y1 = PIE_CY + PIE_R * Math.sin(startAngle);
+				const x2 = PIE_CX + PIE_R * Math.cos(endAngle);
+				const y2 = PIE_CY + PIE_R * Math.sin(endAngle);
+				const largeArc = angle > Math.PI ? 1 : 0;
+				path = `M${PIE_CX},${PIE_CY} L${x1},${y1} A${PIE_R},${PIE_R} 0 ${largeArc} 1 ${x2},${y2} Z`;
+			}
 
 			// Label position (outside pie)
 			const labelR = PIE_R + 14;
@@ -266,6 +271,86 @@
 			cumAngle = endAngle;
 		}
 		return slices;
+	});
+
+	// ── Budget Overview pie ──
+	const BPIE_R = 72;
+	const BPIE_CX = 90;
+	const BPIE_CY = 90;
+	const BPIE_RING_R = 84;
+
+	let budgetAllocPct = $derived(Math.min(1, totalAllocated / Math.max(annualBudget, 1)));
+
+	let budgetPieSlices = $derived.by(() => {
+		const allocPct = budgetAllocPct;
+		const surplusPct = 1 - allocPct;
+		const slices: Array<{label: string; pct: number; color: string; path: string}> = [];
+		let cumAngle = -Math.PI / 2;
+
+		if (allocPct > 0) {
+			if (allocPct >= 1) {
+				slices.push({
+					label: 'Allocated', pct: 1, color: '#60a5fa',
+					path: `M${BPIE_CX},${BPIE_CY - BPIE_R} A${BPIE_R},${BPIE_R} 0 1 1 ${BPIE_CX},${BPIE_CY + BPIE_R} A${BPIE_R},${BPIE_R} 0 1 1 ${BPIE_CX},${BPIE_CY - BPIE_R} Z`
+				});
+			} else {
+				const angle = allocPct * 2 * Math.PI;
+				const end = cumAngle + angle;
+				const x1 = BPIE_CX + BPIE_R * Math.cos(cumAngle);
+				const y1 = BPIE_CY + BPIE_R * Math.sin(cumAngle);
+				const x2 = BPIE_CX + BPIE_R * Math.cos(end);
+				const y2 = BPIE_CY + BPIE_R * Math.sin(end);
+				const large = angle > Math.PI ? 1 : 0;
+				slices.push({
+					label: 'Allocated', pct: allocPct, color: '#60a5fa',
+					path: `M${BPIE_CX},${BPIE_CY} L${x1},${y1} A${BPIE_R},${BPIE_R} 0 ${large} 1 ${x2},${y2} Z`
+				});
+				cumAngle = end;
+			}
+		}
+
+		if (surplusPct > 0) {
+			if (surplusPct >= 1) {
+				slices.push({
+					label: 'Surplus', pct: 1, color: '#4ade80',
+					path: `M${BPIE_CX},${BPIE_CY - BPIE_R} A${BPIE_R},${BPIE_R} 0 1 1 ${BPIE_CX},${BPIE_CY + BPIE_R} A${BPIE_R},${BPIE_R} 0 1 1 ${BPIE_CX},${BPIE_CY - BPIE_R} Z`
+				});
+			} else {
+				const angle = surplusPct * 2 * Math.PI;
+				const end = cumAngle + angle;
+				const x1 = BPIE_CX + BPIE_R * Math.cos(cumAngle);
+				const y1 = BPIE_CY + BPIE_R * Math.sin(cumAngle);
+				const x2 = BPIE_CX + BPIE_R * Math.cos(end);
+				const y2 = BPIE_CY + BPIE_R * Math.sin(end);
+				const large = angle > Math.PI ? 1 : 0;
+				slices.push({
+					label: 'Surplus', pct: surplusPct, color: '#4ade80',
+					path: `M${BPIE_CX},${BPIE_CY} L${x1},${y1} A${BPIE_R},${BPIE_R} 0 ${large} 1 ${x2},${y2} Z`
+				});
+			}
+		}
+
+		return slices;
+	});
+
+	// Overspend ring — grows around the pie when totalAllocated > annualBudget
+	// 100% ring = spending is 2× budget; 50% ring = spending is 1.5× budget
+	let overspendPct = $derived(totalAllocated > annualBudget ? Math.min(1, (totalAllocated - annualBudget) / annualBudget) : 0);
+
+	let overspendRingPath = $derived.by(() => {
+		if (overspendPct <= 0) return '';
+		const startAngle = -Math.PI / 2;
+		if (overspendPct >= 1) {
+			return `M${BPIE_CX},${BPIE_CY - BPIE_RING_R} A${BPIE_RING_R},${BPIE_RING_R} 0 1 1 ${BPIE_CX},${BPIE_CY + BPIE_RING_R} A${BPIE_RING_R},${BPIE_RING_R} 0 1 1 ${BPIE_CX},${BPIE_CY - BPIE_RING_R}`;
+		}
+		const angle = overspendPct * 2 * Math.PI;
+		const end = startAngle + angle;
+		const x1 = BPIE_CX + BPIE_RING_R * Math.cos(startAngle);
+		const y1 = BPIE_CY + BPIE_RING_R * Math.sin(startAngle);
+		const x2 = BPIE_CX + BPIE_RING_R * Math.cos(end);
+		const y2 = BPIE_CY + BPIE_RING_R * Math.sin(end);
+		const large = angle > Math.PI ? 1 : 0;
+		return `M${x1},${y1} A${BPIE_RING_R},${BPIE_RING_R} 0 ${large} 1 ${x2},${y2}`;
 	});
 </script>
 
@@ -340,6 +425,41 @@
 					<div class="budget-bar-fill" style="width: {Math.min(100, (totalAllocated / annualBudget) * 100)}%"></div>
 				</div>
 				<span class="budget-pct">{((totalAllocated / annualBudget) * 100).toFixed(1)}%</span>
+			</div>
+		</div>
+
+		<!-- Budget Overview Pie -->
+		<div class="budget-pie-section">
+			<h4 class="section-label">Budget Overview</h4>
+			<svg viewBox="0 0 180 180" class="budget-pie-svg">
+				{#each budgetPieSlices as slice}
+					<path d={slice.path} fill={slice.color} stroke="var(--color-bg)" stroke-width="1.5" />
+				{/each}
+				{#if overspendPct > 0}
+					<path d={overspendRingPath} fill="none" stroke="#ef4444" stroke-width="8" stroke-linecap="round" opacity="0.85" />
+				{/if}
+				<circle cx={BPIE_CX} cy={BPIE_CY} r="32" fill="var(--color-bg-panel)" />
+				<text x={BPIE_CX} y={BPIE_CY - 6} text-anchor="middle" fill="var(--color-text)" font-size="11" font-weight="700">${annualBudget}B</text>
+				<text x={BPIE_CX} y={BPIE_CY + 8} text-anchor="middle" fill="var(--color-text-dim)" font-size="7">budget</text>
+			</svg>
+			<div class="budget-pie-legend">
+				<div class="legend-item">
+					<span class="legend-swatch" style="background: #60a5fa"></span>
+					<span class="legend-name">Allocated</span>
+					<span class="legend-val">${totalAllocated}B</span>
+				</div>
+				<div class="legend-item">
+					<span class="legend-swatch" style="background: #4ade80"></span>
+					<span class="legend-name">Surplus</span>
+					<span class="legend-val">${surplus}B</span>
+				</div>
+				{#if deficit > 0}
+					<div class="legend-item">
+						<span class="legend-swatch" style="background: #ef4444"></span>
+						<span class="legend-name">Overspend</span>
+						<span class="legend-val">${deficit}B</span>
+					</div>
+				{/if}
 			</div>
 		</div>
 
@@ -491,7 +611,7 @@
 	/* ── Overview row: pie + text + reserves ── */
 	.overview-row {
 		display: grid;
-		grid-template-columns: auto 1fr auto;
+		grid-template-columns: auto minmax(0, 1fr) auto auto;
 		gap: 1.5rem;
 		align-items: start;
 		padding-bottom: 1rem;
@@ -564,6 +684,28 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding-top: 0.25rem;
+		max-width: 280px;
+	}
+
+	/* Budget Overview pie */
+	.budget-pie-section {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		min-width: 180px;
+	}
+
+	.budget-pie-svg {
+		width: 170px;
+		height: 170px;
+		margin-bottom: 0.5rem;
+	}
+
+	.budget-pie-legend {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		width: 100%;
 	}
 
 	.budget-rows {

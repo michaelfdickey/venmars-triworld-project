@@ -99,6 +99,336 @@ export const launchComplexCosts: Record<string, { name: string; costM: number }>
 	'starbase':     { name: 'Starbase Boca Chica',    costM: 380 },
 };
 
+// ── Launch complex detailed profiles ───────────────────────────────
+// Construction materials, plus costs/materials for each operational state
+export interface ComplexMaterialItem { material: string; amountMt: number }
+export interface ComplexStateProfile {
+	costM: number;                  // $M/yr
+	electricityTWh: number;         // TWh/yr
+	materials: ComplexMaterialItem[];
+}
+export interface ComplexRecycleProfile {
+	recoveryM: number;              // $M recovered
+	materials: ComplexMaterialItem[]; // materials recovered
+}
+export interface LaunchComplexProfile {
+	name: string;
+	construction: ComplexMaterialItem[];   // one-time build materials
+	active: ComplexStateProfile;           // regularly scheduled launches
+	idle: ComplexStateProfile;             // claimed, waiting for schedules
+	decommissioned: ComplexStateProfile;   // closed up, can reopen
+	recycled: ComplexRecycleProfile;       // dismantled, resources recovered
+}
+
+export const launchComplexProfiles: Record<string, LaunchComplexProfile> = {
+	'ksc-39a': {
+		name: 'Kennedy SC (LC-39A)',
+		construction: [
+			{ material: 'Steel', amountMt: 0.025 }, { material: 'Concrete / Cement', amountMt: 0.080 },
+			{ material: 'Copper', amountMt: 0.003 }, { material: 'Aluminum', amountMt: 0.008 },
+			{ material: 'Carbon Fiber', amountMt: 0.0004 },
+		],
+		active: {
+			costM: 450, electricityTWh: 2.1,
+			materials: [
+				{ material: 'Steel', amountMt: 0.012 }, { material: 'Concrete / Cement', amountMt: 0.05 },
+				{ material: 'Copper', amountMt: 0.0008 }, { material: 'Aluminum', amountMt: 0.003 },
+			],
+		},
+		idle: {
+			costM: 180, electricityTWh: 0.6,
+			materials: [
+				{ material: 'Steel', amountMt: 0.003 }, { material: 'Concrete / Cement', amountMt: 0.008 },
+			],
+		},
+		decommissioned: {
+			costM: 35, electricityTWh: 0.05,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 280,
+			materials: [
+				{ material: 'Steel', amountMt: 0.018 }, { material: 'Copper', amountMt: 0.002 },
+				{ material: 'Aluminum', amountMt: 0.005 },
+			],
+		},
+	},
+	'ccafs-40': {
+		name: 'Cape Canaveral (SLC-40)',
+		construction: [
+			{ material: 'Steel', amountMt: 0.018 }, { material: 'Concrete / Cement', amountMt: 0.055 },
+			{ material: 'Copper', amountMt: 0.002 }, { material: 'Aluminum', amountMt: 0.005 },
+		],
+		active: {
+			costM: 320, electricityTWh: 1.8,
+			materials: [
+				{ material: 'Steel', amountMt: 0.008 }, { material: 'Concrete / Cement', amountMt: 0.03 },
+				{ material: 'Copper', amountMt: 0.0005 }, { material: 'Aluminum', amountMt: 0.002 },
+			],
+		},
+		idle: {
+			costM: 130, electricityTWh: 0.5,
+			materials: [
+				{ material: 'Steel', amountMt: 0.002 }, { material: 'Concrete / Cement', amountMt: 0.006 },
+			],
+		},
+		decommissioned: {
+			costM: 28, electricityTWh: 0.04,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 200,
+			materials: [
+				{ material: 'Steel', amountMt: 0.013 }, { material: 'Copper', amountMt: 0.0015 },
+				{ material: 'Aluminum', amountMt: 0.003 },
+			],
+		},
+	},
+	'baikonur': {
+		name: 'Baikonur Cosmodrome',
+		construction: [
+			{ material: 'Steel', amountMt: 0.030 }, { material: 'Concrete / Cement', amountMt: 0.120 },
+			{ material: 'Copper', amountMt: 0.002 },
+		],
+		active: {
+			costM: 280, electricityTWh: 1.5,
+			materials: [
+				{ material: 'Steel', amountMt: 0.015 }, { material: 'Concrete / Cement', amountMt: 0.08 },
+				{ material: 'Copper', amountMt: 0.0006 },
+			],
+		},
+		idle: {
+			costM: 110, electricityTWh: 0.4,
+			materials: [
+				{ material: 'Steel', amountMt: 0.004 }, { material: 'Concrete / Cement', amountMt: 0.015 },
+			],
+		},
+		decommissioned: {
+			costM: 25, electricityTWh: 0.03,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 160,
+			materials: [
+				{ material: 'Steel', amountMt: 0.022 }, { material: 'Copper', amountMt: 0.0015 },
+			],
+		},
+	},
+	'vandenberg': {
+		name: 'Vandenberg SFB',
+		construction: [
+			{ material: 'Steel', amountMt: 0.016 }, { material: 'Concrete / Cement', amountMt: 0.050 },
+			{ material: 'Copper', amountMt: 0.002 }, { material: 'Aluminum', amountMt: 0.004 },
+		],
+		active: {
+			costM: 310, electricityTWh: 1.6,
+			materials: [
+				{ material: 'Steel', amountMt: 0.007 }, { material: 'Concrete / Cement', amountMt: 0.025 },
+				{ material: 'Copper', amountMt: 0.0004 },
+			],
+		},
+		idle: {
+			costM: 125, electricityTWh: 0.45,
+			materials: [
+				{ material: 'Steel', amountMt: 0.002 }, { material: 'Concrete / Cement', amountMt: 0.005 },
+			],
+		},
+		decommissioned: {
+			costM: 25, electricityTWh: 0.03,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 190,
+			materials: [
+				{ material: 'Steel', amountMt: 0.012 }, { material: 'Copper', amountMt: 0.0015 },
+				{ material: 'Aluminum', amountMt: 0.003 },
+			],
+		},
+	},
+	'xichang': {
+		name: 'Xichang SLC',
+		construction: [
+			{ material: 'Steel', amountMt: 0.012 }, { material: 'Concrete / Cement', amountMt: 0.065 },
+			{ material: 'Copper', amountMt: 0.001 },
+		],
+		active: {
+			costM: 180, electricityTWh: 1.2,
+			materials: [
+				{ material: 'Steel', amountMt: 0.006 }, { material: 'Concrete / Cement', amountMt: 0.04 },
+			],
+		},
+		idle: {
+			costM: 70, electricityTWh: 0.3,
+			materials: [
+				{ material: 'Steel', amountMt: 0.0015 }, { material: 'Concrete / Cement', amountMt: 0.008 },
+			],
+		},
+		decommissioned: {
+			costM: 15, electricityTWh: 0.02,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 90,
+			materials: [
+				{ material: 'Steel', amountMt: 0.009 }, { material: 'Copper', amountMt: 0.0008 },
+			],
+		},
+	},
+	'wenchang': {
+		name: 'Wenchang SLS',
+		construction: [
+			{ material: 'Steel', amountMt: 0.020 }, { material: 'Concrete / Cement', amountMt: 0.060 },
+			{ material: 'Copper', amountMt: 0.002 }, { material: 'Aluminum', amountMt: 0.005 },
+		],
+		active: {
+			costM: 220, electricityTWh: 1.4,
+			materials: [
+				{ material: 'Steel', amountMt: 0.009 }, { material: 'Concrete / Cement', amountMt: 0.035 },
+				{ material: 'Aluminum', amountMt: 0.002 },
+			],
+		},
+		idle: {
+			costM: 90, electricityTWh: 0.35,
+			materials: [
+				{ material: 'Steel', amountMt: 0.002 }, { material: 'Concrete / Cement', amountMt: 0.007 },
+			],
+		},
+		decommissioned: {
+			costM: 20, electricityTWh: 0.03,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 130,
+			materials: [
+				{ material: 'Steel', amountMt: 0.015 }, { material: 'Copper', amountMt: 0.0015 },
+				{ material: 'Aluminum', amountMt: 0.003 },
+			],
+		},
+	},
+	'jiuquan': {
+		name: 'Jiuquan SLC',
+		construction: [
+			{ material: 'Steel', amountMt: 0.010 }, { material: 'Concrete / Cement', amountMt: 0.055 },
+			{ material: 'Copper', amountMt: 0.001 },
+		],
+		active: {
+			costM: 160, electricityTWh: 1.0,
+			materials: [
+				{ material: 'Steel', amountMt: 0.005 }, { material: 'Concrete / Cement', amountMt: 0.03 },
+			],
+		},
+		idle: {
+			costM: 65, electricityTWh: 0.25,
+			materials: [
+				{ material: 'Steel', amountMt: 0.0012 }, { material: 'Concrete / Cement', amountMt: 0.006 },
+			],
+		},
+		decommissioned: {
+			costM: 12, electricityTWh: 0.02,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 80,
+			materials: [
+				{ material: 'Steel', amountMt: 0.007 }, { material: 'Copper', amountMt: 0.0008 },
+			],
+		},
+	},
+	'sriharikota': {
+		name: 'Satish Dhawan SC',
+		construction: [
+			{ material: 'Steel', amountMt: 0.008 }, { material: 'Concrete / Cement', amountMt: 0.040 },
+			{ material: 'Copper', amountMt: 0.001 },
+		],
+		active: {
+			costM: 120, electricityTWh: 0.8,
+			materials: [
+				{ material: 'Steel', amountMt: 0.004 }, { material: 'Concrete / Cement', amountMt: 0.02 },
+			],
+		},
+		idle: {
+			costM: 50, electricityTWh: 0.2,
+			materials: [
+				{ material: 'Steel', amountMt: 0.001 }, { material: 'Concrete / Cement', amountMt: 0.004 },
+			],
+		},
+		decommissioned: {
+			costM: 10, electricityTWh: 0.015,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 60,
+			materials: [
+				{ material: 'Steel', amountMt: 0.006 }, { material: 'Copper', amountMt: 0.0007 },
+			],
+		},
+	},
+	'kourou': {
+		name: 'Guiana Space Centre',
+		construction: [
+			{ material: 'Steel', amountMt: 0.022 }, { material: 'Concrete / Cement', amountMt: 0.070 },
+			{ material: 'Copper', amountMt: 0.003 }, { material: 'Aluminum', amountMt: 0.007 },
+			{ material: 'Carbon Fiber', amountMt: 0.0003 },
+		],
+		active: {
+			costM: 350, electricityTWh: 1.7,
+			materials: [
+				{ material: 'Steel', amountMt: 0.01 }, { material: 'Concrete / Cement', amountMt: 0.04 },
+				{ material: 'Aluminum', amountMt: 0.003 },
+			],
+		},
+		idle: {
+			costM: 140, electricityTWh: 0.5,
+			materials: [
+				{ material: 'Steel', amountMt: 0.003 }, { material: 'Concrete / Cement', amountMt: 0.008 },
+			],
+		},
+		decommissioned: {
+			costM: 30, electricityTWh: 0.04,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 220,
+			materials: [
+				{ material: 'Steel', amountMt: 0.016 }, { material: 'Copper', amountMt: 0.002 },
+				{ material: 'Aluminum', amountMt: 0.005 },
+			],
+		},
+	},
+	'starbase': {
+		name: 'Starbase Boca Chica',
+		construction: [
+			{ material: 'Steel', amountMt: 0.035 }, { material: 'Concrete / Cement', amountMt: 0.095 },
+			{ material: 'Copper', amountMt: 0.004 }, { material: 'Aluminum', amountMt: 0.010 },
+			{ material: 'Carbon Fiber', amountMt: 0.0006 },
+		],
+		active: {
+			costM: 380, electricityTWh: 2.5,
+			materials: [
+				{ material: 'Steel', amountMt: 0.02 }, { material: 'Concrete / Cement', amountMt: 0.06 },
+				{ material: 'Copper', amountMt: 0.001 }, { material: 'Aluminum', amountMt: 0.005 },
+			],
+		},
+		idle: {
+			costM: 155, electricityTWh: 0.7,
+			materials: [
+				{ material: 'Steel', amountMt: 0.005 }, { material: 'Concrete / Cement', amountMt: 0.012 },
+			],
+		},
+		decommissioned: {
+			costM: 32, electricityTWh: 0.05,
+			materials: [],
+		},
+		recycled: {
+			recoveryM: 310,
+			materials: [
+				{ material: 'Steel', amountMt: 0.025 }, { material: 'Copper', amountMt: 0.003 },
+				{ material: 'Aluminum', amountMt: 0.007 },
+			],
+		},
+	},
+};
+
 // ── Material allocation store ──────────────────────────────────────
 // Spending category indices:
 //   0: Launch Infrastructure, 1: Rocket Manufacturing, 2: Propellant Production,

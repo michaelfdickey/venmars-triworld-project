@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { claimedComplexes } from '$lib/stores/gameStore';
+	import { claimedComplexes, launchComplexProfiles, type LaunchComplexProfile } from '$lib/stores/gameStore';
 	import type L from 'leaflet';
 
 	type PadRefurb = 'manual' | 'semi-auto' | 'automated';
@@ -124,6 +124,23 @@
 	let leaflet: typeof L;
 	let markers: L.Marker[] = [];
 
+	// Detail modal state
+	let detailSite = $state<LaunchComplex | null>(null);
+	let detailProfile = $derived<LaunchComplexProfile | null>(
+		detailSite ? (launchComplexProfiles[detailSite.id] ?? null) : null
+	);
+
+	function openDetails(siteId: string) {
+		const site = complexes.find(s => s.id === siteId);
+		if (site) detailSite = site;
+	}
+
+	function formatMt(mt: number): string {
+		if (mt >= 1) return mt.toFixed(1) + ' Mt';
+		if (mt >= 0.001) return (mt * 1000).toFixed(0) + ' t';
+		return (mt * 1000000).toFixed(0) + ' kg';
+	}
+
 	function isClaimed(id: string): boolean {
 		let result = false;
 		claimedComplexes.subscribe(s => { result = s.has(id); })();
@@ -188,6 +205,7 @@
 				</div>
 				<div class="popup-actions">
 					${claimBtn}
+					<button class="popup-btn popup-btn-details" data-site-id="${site.id}">📋 Details</button>
 					<button class="popup-btn popup-btn-upgrade" ${upgradeDis}>⬆ Upgrade</button>
 					<button class="popup-btn popup-btn-decom" ${decommDis}>🗑 Decommission</button>
 				</div>
@@ -266,6 +284,13 @@
 					if (id) claimComplex(id);
 				});
 			});
+			const detailBtns = document.querySelectorAll('.popup-btn-details');
+			detailBtns.forEach(btn => {
+				btn.addEventListener('click', (e) => {
+					const id = (e.currentTarget as HTMLElement).dataset.siteId;
+					if (id) openDetails(id);
+				});
+			});
 		});
 
 		return () => {
@@ -295,6 +320,186 @@
 		<span class="text-[var(--color-text-dim)]/50 ml-auto">Scroll to zoom · Drag to pan</span>
 	</div>
 </div>
+
+{#if detailSite && detailProfile}
+	{@const claimed = isClaimed(detailSite.id)}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="detail-overlay" onclick={() => detailSite = null}>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="detail-modal" onclick={(e) => e.stopPropagation()}>
+			<div class="dm-header">
+				<span class="dm-title">{detailSite.name}</span>
+				{#if claimed}
+					<span class="dm-badge-claimed">CLAIMED</span>
+				{/if}
+				<span class="dm-country">{detailSite.country}</span>
+				<button class="dm-close" onclick={() => detailSite = null}>✕</button>
+			</div>
+
+			<div class="dm-grid">
+				<!-- TOP LEFT: Facility Info -->
+				<div class="dm-cell">
+					<h4 class="dm-cell-title">Facility Specifications</h4>
+					<div class="dm-kv-grid">
+						<span class="dm-label">Location</span>
+						<span class="dm-value dm-mono">{detailSite.lat.toFixed(4)}°N, {Math.abs(detailSite.lng).toFixed(4)}°{detailSite.lng >= 0 ? 'E' : 'W'}</span>
+
+						<span class="dm-label">Launch Capacity</span>
+						<span class="dm-value">{formatKg(detailSite.launchCapacityKg)} to LEO</span>
+
+						<span class="dm-label">Launch Cadence</span>
+						<span class="dm-value">{detailSite.launchCadence} launches/yr</span>
+
+						<span class="dm-label">Fuel Storage</span>
+						<span class="dm-value">{detailSite.fuelCapacityT.toLocaleString()} t</span>
+
+						<span class="dm-label">Fuel Types</span>
+						<span class="dm-value">{detailSite.fuelTypes}</span>
+
+						<span class="dm-label">ΔV to LEO (100 km)</span>
+						<span class="dm-value dm-mono">{detailSite.dvLEO100.toLocaleString()} m/s</span>
+
+						<span class="dm-label">ΔV Min Inclination</span>
+						<span class="dm-value dm-mono">{detailSite.dvMinInclination.toLocaleString()} m/s</span>
+
+						<span class="dm-label">ΔV Lunar Transfer</span>
+						<span class="dm-value dm-mono">{detailSite.dvLunarTransfer.toLocaleString()} m/s</span>
+
+						<span class="dm-label">ΔV Polar Orbit</span>
+						<span class="dm-value dm-mono">{detailSite.dvPolar.toLocaleString()} m/s</span>
+
+						<span class="dm-label">Weather Reliability</span>
+						<span class="dm-value">{(detailSite.weatherReliability * 100).toFixed(0)}%</span>
+
+						<span class="dm-label">Pad Refurbishment</span>
+						<span class="dm-value">{refurbLabels[detailSite.padRefurb]}</span>
+					</div>
+				</div>
+
+				<!-- TOP RIGHT: Operational State Costs -->
+				<div class="dm-cell">
+					<h4 class="dm-cell-title">Operational Costs by State</h4>
+					<div class="dm-states">
+						<!-- Active -->
+						<div class="dm-state-card dm-state-active">
+							<div class="dm-state-header">
+								<span class="dm-state-icon">🟢</span>
+								<span class="dm-state-name">Active</span>
+								<span class="dm-state-desc">Regularly scheduled launches</span>
+							</div>
+							<div class="dm-state-costs">
+								<div class="dm-cost-row">
+									<span class="dm-cost-label">Annual Cost</span>
+									<span class="dm-cost-val dm-cost-money">${detailProfile.active.costM}M/yr</span>
+								</div>
+								<div class="dm-cost-row">
+									<span class="dm-cost-label">Electricity</span>
+									<span class="dm-cost-val dm-cost-energy">{detailProfile.active.electricityTWh} TWh/yr</span>
+								</div>
+								{#each detailProfile.active.materials as mat}
+									<div class="dm-cost-row">
+										<span class="dm-cost-label">{mat.material}</span>
+										<span class="dm-cost-val">{formatMt(mat.amountMt)}/yr</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+
+						<!-- Idle -->
+						<div class="dm-state-card dm-state-idle">
+							<div class="dm-state-header">
+								<span class="dm-state-icon">🟡</span>
+								<span class="dm-state-name">Idle</span>
+								<span class="dm-state-desc">No scheduled launches</span>
+							</div>
+							<div class="dm-state-costs">
+								<div class="dm-cost-row">
+									<span class="dm-cost-label">Annual Cost</span>
+									<span class="dm-cost-val dm-cost-money">${detailProfile.idle.costM}M/yr</span>
+								</div>
+								<div class="dm-cost-row">
+									<span class="dm-cost-label">Electricity</span>
+									<span class="dm-cost-val dm-cost-energy">{detailProfile.idle.electricityTWh} TWh/yr</span>
+								</div>
+								{#each detailProfile.idle.materials as mat}
+									<div class="dm-cost-row">
+										<span class="dm-cost-label">{mat.material}</span>
+										<span class="dm-cost-val">{formatMt(mat.amountMt)}/yr</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+
+						<!-- Decommissioned -->
+						<div class="dm-state-card dm-state-decom">
+							<div class="dm-state-header">
+								<span class="dm-state-icon">🔴</span>
+								<span class="dm-state-name">Decommissioned</span>
+								<span class="dm-state-desc">Closed up, can be re-opened</span>
+							</div>
+							<div class="dm-state-costs">
+								<div class="dm-cost-row">
+									<span class="dm-cost-label">Annual Cost</span>
+									<span class="dm-cost-val dm-cost-money">${detailProfile.decommissioned.costM}M/yr</span>
+								</div>
+								<div class="dm-cost-row">
+									<span class="dm-cost-label">Electricity</span>
+									<span class="dm-cost-val dm-cost-energy">{detailProfile.decommissioned.electricityTWh} TWh/yr</span>
+								</div>
+								{#if detailProfile.decommissioned.materials.length === 0}
+									<div class="dm-cost-row">
+										<span class="dm-cost-label dm-cost-none">No material upkeep</span>
+									</div>
+								{/if}
+							</div>
+						</div>
+
+						<!-- Recycled -->
+						<div class="dm-state-card dm-state-recycled">
+							<div class="dm-state-header">
+								<span class="dm-state-icon">♻️</span>
+								<span class="dm-state-name">Recycled</span>
+								<span class="dm-state-desc">Dismantled &amp; sold — you recover:</span>
+							</div>
+							<div class="dm-state-costs">
+								<div class="dm-cost-row">
+									<span class="dm-cost-label">Cash Recovery</span>
+									<span class="dm-cost-val dm-cost-recovery">+${detailProfile.recycled.recoveryM}M</span>
+								</div>
+								{#each detailProfile.recycled.materials as mat}
+									<div class="dm-cost-row">
+										<span class="dm-cost-label">{mat.material}</span>
+										<span class="dm-cost-val dm-cost-recovery">+{formatMt(mat.amountMt)}</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- BOTTOM LEFT: Construction Materials -->
+				<div class="dm-cell">
+					<h4 class="dm-cell-title">Construction Requirements</h4>
+					<p class="dm-cell-note">One-time materials to build this complex from scratch</p>
+					<div class="dm-mat-list">
+						{#each detailProfile.construction as mat}
+							<div class="dm-mat-row">
+								<span class="dm-mat-name">{mat.material}</span>
+								<span class="dm-mat-amount">{formatMt(mat.amountMt)}</span>
+							</div>
+						{/each}
+					</div>
+				</div>
+
+				<!-- BOTTOM RIGHT: placeholder for future content -->
+				<div class="dm-cell dm-cell-empty">
+					<h4 class="dm-cell-title">Launch History</h4>
+					<p class="dm-cell-note">Launch schedule and mission history will appear here once operations begin.</p>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.earth-map-wrapper {
@@ -498,6 +703,15 @@
 		background: rgba(74, 222, 128, 0.15) !important;
 	}
 
+	:global(.popup-btn-details) {
+		border-color: rgba(96, 165, 250, 0.4);
+		color: #60a5fa;
+	}
+
+	:global(.popup-btn-details:hover) {
+		background: rgba(96, 165, 250, 0.15) !important;
+	}
+
 	:global(.popup-btn-upgrade) {
 		border-color: rgba(96, 165, 250, 0.4);
 		color: #60a5fa;
@@ -550,5 +764,231 @@
 
 	:global(.leaflet-control-zoom a:hover) {
 		background: #2d3a4f !important;
+	}
+
+	/* ── Details modal ── */
+	.detail-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.65);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1100;
+	}
+
+	.detail-modal {
+		background: var(--color-bg-card, #1a2234);
+		border: 1px solid var(--color-border);
+		border-radius: 0.75rem;
+		width: 820px;
+		max-width: 95vw;
+		max-height: 90vh;
+		overflow-y: auto;
+		box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+	}
+
+	.dm-header {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.85rem 1.25rem;
+		border-bottom: 1px solid var(--color-border);
+		flex-wrap: wrap;
+	}
+
+	.dm-title {
+		font-size: 1.1rem;
+		font-weight: 700;
+		color: #3b82f6;
+	}
+
+	.dm-badge-claimed {
+		font-size: 0.6rem;
+		padding: 0.1rem 0.4rem;
+		border-radius: 0.2rem;
+		background: rgba(74, 222, 128, 0.2);
+		color: #4ade80;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+	}
+
+	.dm-country {
+		font-size: 0.75rem;
+		color: var(--color-text-dim);
+		flex: 1;
+	}
+
+	.dm-close {
+		background: transparent;
+		border: none;
+		color: var(--color-text-dim);
+		font-size: 1.1rem;
+		cursor: pointer;
+		padding: 0.2rem 0.5rem;
+		border-radius: 0.25rem;
+	}
+	.dm-close:hover { background: var(--color-border); color: var(--color-text); }
+
+	.dm-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1px;
+		background: var(--color-border);
+	}
+
+	.dm-cell {
+		background: var(--color-bg-card, #1a2234);
+		padding: 1rem 1.25rem;
+	}
+
+	.dm-cell-empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		text-align: center;
+	}
+
+	.dm-cell-title {
+		font-size: 0.75rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--color-text-dim);
+		margin-bottom: 0.6rem;
+	}
+
+	.dm-cell-note {
+		font-size: 0.65rem;
+		color: var(--color-text-dim);
+		margin-bottom: 0.5rem;
+		line-height: 1.4;
+	}
+
+	/* Key-value grid in top-left */
+	.dm-kv-grid {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 0.25rem 0.75rem;
+	}
+
+	.dm-label {
+		font-size: 0.68rem;
+		font-weight: 600;
+		color: var(--color-text-dim);
+		white-space: nowrap;
+	}
+
+	.dm-value {
+		font-size: 0.7rem;
+		color: var(--color-text);
+	}
+
+	.dm-mono {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+	}
+
+	/* State cards in top-right */
+	.dm-states {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.dm-state-card {
+		border: 1px solid var(--color-border);
+		border-radius: 0.4rem;
+		padding: 0.5rem 0.65rem;
+		background: rgba(255, 255, 255, 0.02);
+	}
+
+	.dm-state-header {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		margin-bottom: 0.35rem;
+		flex-wrap: wrap;
+	}
+
+	.dm-state-icon { font-size: 0.75rem; }
+
+	.dm-state-name {
+		font-size: 0.75rem;
+		font-weight: 700;
+		color: var(--color-text);
+	}
+
+	.dm-state-desc {
+		font-size: 0.58rem;
+		color: var(--color-text-dim);
+		margin-left: auto;
+	}
+
+	.dm-state-costs {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		padding-left: 1.1rem;
+	}
+
+	.dm-cost-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+	}
+
+	.dm-cost-label {
+		font-size: 0.65rem;
+		color: var(--color-text-dim);
+	}
+
+	.dm-cost-none {
+		font-style: italic;
+		opacity: 0.6;
+	}
+
+	.dm-cost-val {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.65rem;
+		font-weight: 600;
+		color: var(--color-text);
+	}
+
+	.dm-cost-money { color: #fbbf24; }
+	.dm-cost-energy { color: #facc15; }
+	.dm-cost-recovery { color: #4ade80; }
+
+	.dm-state-active { border-color: rgba(74, 222, 128, 0.25); }
+	.dm-state-idle { border-color: rgba(250, 204, 21, 0.25); }
+	.dm-state-decom { border-color: rgba(239, 68, 68, 0.2); }
+	.dm-state-recycled { border-color: rgba(96, 165, 250, 0.2); }
+
+	/* Construction material list */
+	.dm-mat-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+
+	.dm-mat-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		padding: 0.2rem 0.4rem;
+		border-radius: 0.25rem;
+		background: rgba(255, 255, 255, 0.02);
+	}
+
+	.dm-mat-name {
+		font-size: 0.7rem;
+		color: var(--color-text);
+	}
+
+	.dm-mat-amount {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: #60a5fa;
 	}
 </style>

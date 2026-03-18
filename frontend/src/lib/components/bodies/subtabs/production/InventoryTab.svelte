@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { earthMaterialStockpiles, materialDefs, materialAllocations } from '$lib/stores/gameStore';
+
 	let { bodyId }: { bodyId: string } = $props();
 
 	type Category = 'raw' | 'structural' | 'compound' | 'specialty' | 'facility';
@@ -11,6 +13,7 @@
 		unit: string;
 		rate: string;
 		available: boolean;
+		matDefIndex?: number; // index into materialDefs, if linked
 	}
 
 	const categoryLabels: Record<Category, string> = {
@@ -43,24 +46,24 @@
 			{ name: 'Water (Purified)', icon: '💧', category: 'raw', stockpile: 0, unit: 'L', rate: 'unlimited', available: true },
 
 			// Structural & industrial materials (match materialDefs)
-			{ name: 'Steel', icon: '🔩', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Aluminum', icon: '🪶', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Copper (Refined)', icon: '🔶', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Titanium', icon: '⚙️', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Nickel', icon: '🔧', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Silicon (Electronic)', icon: '💠', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Rare Earth Elements', icon: '💎', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Carbon Fiber', icon: '🧱', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Inconel / Superalloys', icon: '🔥', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Concrete / Cement', icon: '🏗️', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true },
+			{ name: 'Steel', icon: '🔩', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 0 },
+			{ name: 'Aluminum', icon: '🪶', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 1 },
+			{ name: 'Copper (Refined)', icon: '🔶', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 2 },
+			{ name: 'Titanium', icon: '⚙️', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 3 },
+			{ name: 'Nickel', icon: '🔧', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 4 },
+			{ name: 'Silicon (Electronic)', icon: '💠', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 5 },
+			{ name: 'Rare Earth Elements', icon: '💎', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 6 },
+			{ name: 'Carbon Fiber', icon: '🧱', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 7 },
+			{ name: 'Inconel / Superalloys', icon: '🔥', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 8 },
+			{ name: 'Concrete / Cement', icon: '🏗️', category: 'structural', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 9 },
 
 			// Compounds & propellants (match materialDefs)
-			{ name: 'Liquid Oxygen (LOX)', icon: '🧪', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Liquid Hydrogen (LH₂)', icon: '🧪', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Liquid Methane (LCH₄)', icon: '🧪', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'RP-1 Kerosene', icon: '🛢️', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Hydrazine (N₂H₄)', icon: '⚠️', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
-			{ name: 'Xenon', icon: '💨', category: 'compound', stockpile: 0, unit: 'kg', rate: '—', available: true },
+			{ name: 'Liquid Oxygen (LOX)', icon: '🧪', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 10 },
+			{ name: 'Liquid Hydrogen (LH₂)', icon: '🧪', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 11 },
+			{ name: 'Liquid Methane (LCH₄)', icon: '🧪', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 12 },
+			{ name: 'RP-1 Kerosene', icon: '🛢️', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 13 },
+			{ name: 'Hydrazine (N₂H₄)', icon: '⚠️', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true, matDefIndex: 14 },
+			{ name: 'Xenon', icon: '💨', category: 'compound', stockpile: 0, unit: 'kg', rate: '—', available: true, matDefIndex: 15 },
 			{ name: 'Nitrogen Tetroxide (NTO)', icon: '⚠️', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
 			{ name: 'Liquid Nitrogen (LN₂)', icon: '🧊', category: 'compound', stockpile: 0, unit: 't', rate: '—', available: true },
 
@@ -164,7 +167,57 @@
 
 	const categories: Category[] = ['raw', 'structural', 'compound', 'specialty', 'facility'];
 
-	let materials = $derived(materialData[bodyId] ?? []);
+	// Format a rate in t/day to a readable string
+	function formatRate(tPerDay: number, unit: string): string {
+		if (tPerDay <= 0) return '—';
+		if (unit === 'kg') {
+			const kgPerDay = tPerDay * 1000;
+			if (kgPerDay >= 1000) return `+${(kgPerDay / 1000).toFixed(1)} t/day`;
+			if (kgPerDay >= 1) return `+${kgPerDay.toFixed(1)} kg/day`;
+			return `+${(kgPerDay * 1000).toFixed(0)} g/day`;
+		}
+		if (tPerDay >= 1000) return `+${(tPerDay / 1000).toFixed(1)} kt/day`;
+		if (tPerDay >= 1) return `+${tPerDay.toFixed(1)} t/day`;
+		return `+${(tPerDay * 1000).toFixed(0)} kg/day`;
+	}
+
+	// Format stockpile for display
+	function formatStockpile(tonnes: number, unit: string): string {
+		if (unit === 'kg') {
+			const kg = tonnes * 1000;
+			if (kg >= 1_000_000) return (kg / 1_000_000).toFixed(1);
+			if (kg >= 1000) return Math.floor(kg).toLocaleString();
+			return kg.toFixed(1);
+		}
+		if (tonnes >= 1_000_000) return (tonnes / 1_000_000).toFixed(2) + ' Mt';
+		if (tonnes >= 1000) return Math.floor(tonnes).toLocaleString();
+		if (tonnes >= 1) return tonnes.toFixed(1);
+		if (tonnes > 0) return (tonnes * 1000).toFixed(0) + ' kg';
+		return '0';
+	}
+
+	let baseMaterials = $derived(materialData[bodyId] ?? []);
+
+	// For Earth, overlay stockpile & rate from stores onto materials with matDefIndex
+	let materials = $derived.by(() => {
+		if (bodyId !== 'earth') return baseMaterials;
+		const stockpiles = $earthMaterialStockpiles;
+		const allocs = $materialAllocations;
+		return baseMaterials.map(mat => {
+			if (mat.matDefIndex == null) return mat;
+			const idx = mat.matDefIndex;
+			const m = materialDefs[idx];
+			const pct = allocs[idx] ?? 0;
+			const mtPerYear = m.globalMt * (pct / 100);
+			const tPerDay = (mtPerYear * 1_000_000) / 365.25;
+			return {
+				...mat,
+				stockpile: stockpiles[idx] ?? 0,
+				rate: formatRate(tPerDay, mat.unit),
+			};
+		});
+	});
+
 	let grouped = $derived(
 		categories
 			.map(cat => ({ cat, items: materials.filter(m => m.category === cat) }))
@@ -204,7 +257,13 @@
 						</div>
 						<div class="mat-bottom">
 							<span class="mat-stockpile">
-								{mat.available ? mat.stockpile.toLocaleString() : '—'}
+								{#if !mat.available}
+									—
+								{:else if mat.matDefIndex != null}
+									{formatStockpile(mat.stockpile, mat.unit)}
+								{:else}
+									{mat.stockpile.toLocaleString()}
+								{/if}
 								<span class="mat-unit">{mat.unit}</span>
 							</span>
 							<span class="mat-rate" class:positive={mat.available && mat.rate.includes('+')}>

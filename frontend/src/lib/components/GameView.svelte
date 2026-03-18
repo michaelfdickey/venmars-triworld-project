@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { activeTab, gameState, gameTime, simSpeed } from '$lib/stores/gameStore';
+	import { activeTab, gameState, gameTime, simSpeed, materialAllocations, tickMaterials } from '$lib/stores/gameStore';
 	import TabBar from './TabBar.svelte';
 	import BodyPanel from './bodies/BodyPanel.svelte';
 	import SettingsPanel from './SettingsPanel.svelte';
@@ -18,8 +18,10 @@
 	let rafId: number;
 	let lastTime = 0;
 	let currentSpeed = 0;
+	let currentAllocations: number[] = [];
 
 	const unsub = simSpeed.subscribe(v => { currentSpeed = v; });
+	const unsubAlloc = materialAllocations.subscribe(v => { currentAllocations = v; });
 
 	onMount(() => {
 		lastTime = performance.now();
@@ -32,6 +34,7 @@
 				const dtSeconds = dtMs / 1000;
 				const deltaHours = currentSpeed * dtSeconds;
 				gameTime.update(t => t + deltaHours);
+				tickMaterials(deltaHours, currentAllocations);
 			}
 
 			rafId = requestAnimationFrame(loop);
@@ -42,6 +45,7 @@
 		return () => {
 			cancelAnimationFrame(rafId);
 			unsub();
+			unsubAlloc();
 		};
 	});
 </script>

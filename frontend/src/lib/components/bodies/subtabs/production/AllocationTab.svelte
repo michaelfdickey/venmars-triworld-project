@@ -146,10 +146,12 @@
 		<!-- Column headers -->
 		<div class="alloc-col-headers">
 			<span class="ach-alloc">Material &amp; Allocation</span>
-			<span class="ach-val">Annual</span>
-			<span class="ach-val">Daily</span>
-			<span class="ach-val ach-trend">Trend</span>
-			<span class="ach-prod">Top Producers</span>
+			<div class="ach-right">
+				<span class="ach-val">Annual</span>
+				<span class="ach-val">Daily</span>
+				<span class="ach-val ach-trend">Trend</span>
+				<span class="ach-prod">Top Producers</span>
+			</div>
 		</div>
 		{#each materials as mat, i}
 			<div class="alloc-row" class:aerospace={mat.aerospace}>
@@ -321,13 +323,13 @@
 
 	.alloc-global-cols {
 		display: grid;
-		grid-template-columns: 5.5rem 5.5rem 1.8rem 1fr;
+		grid-template-columns: 5.5rem 5.5rem 1.8rem minmax(0, 1fr);
 		gap: 0.25rem;
 		align-items: center;
 		flex-shrink: 0;
 		border-left: 1px solid var(--color-border);
 		padding-left: 0.5rem;
-		min-width: 260px;
+		width: 310px;
 	}
 
 	.agc-val {
@@ -368,25 +370,30 @@
 	.ach-alloc {
 		flex: 1;
 		min-width: 0;
+		text-align: center;
+	}
+
+	.ach-right {
+		display: grid;
+		grid-template-columns: 5.5rem 5.5rem 1.8rem minmax(0, 1fr);
+		gap: 0.25rem;
+		align-items: center;
+		flex-shrink: 0;
+		width: 310px;
+		padding-left: 0.5rem;
+		border-left: 1px solid transparent;
 	}
 
 	.ach-val {
-		width: 5.5rem;
-		text-align: right;
-		flex-shrink: 0;
+		text-align: center;
 	}
 
 	.ach-trend {
-		width: 1.8rem;
 		text-align: center;
 	}
 
 	.ach-prod {
-		flex-shrink: 0;
-		min-width: 0;
-		/* Align with agc-prod — offset for border-left + padding */
-		padding-left: 0.5rem;
-		border-left: 1px solid transparent;
+		text-align: center;
 	}
 
 	.alloc-top-row {

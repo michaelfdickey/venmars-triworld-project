@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, payloadInventory, marketSatellites, venMarsPayloads, customPayloads } from '$lib/stores/gameStore';
+
 	let { bodyId }: { bodyId: string } = $props();
 
 	interface LaunchSite {
@@ -29,6 +31,24 @@
 
 	const FUEL_PACKING_EFFICIENCY = 0.80; // 80% of remaining fairing volume is usable
 
+	// Map claimed complex IDs to launch site display names
+	const complexIdToSiteName: Record<string, string> = {
+		'ksc-39a': 'Kennedy Space Center',
+		'ccafs-40': 'Cape Canaveral SFS',
+		'vandenberg': 'Vandenberg SFB',
+		'starbase': 'Boca Chica Starbase',
+		'kourou': 'Kourou (CSG)',
+		'baikonur': 'Baikonur',
+		'wenchang': 'Wenchang',
+		'sriharikota': 'Satish Dhawan',
+		'xichang': 'Tanegashima',
+		'jiuquan': 'Wallops Island',
+	};
+
+	let ownedSiteNames = $derived(
+		new Set([...$claimedComplexes].map(id => complexIdToSiteName[id]).filter(Boolean))
+	);
+
 	const launchSites: LaunchSite[] = [
 		{ name: 'Kennedy Space Center', body: 'earth', lat: '28.5°N' },
 		{ name: 'Cape Canaveral SFS', body: 'earth', lat: '28.5°N' },
@@ -46,6 +66,20 @@
 		{ name: 'Jezero Operations Base', body: 'mars', lat: '18.4°N' },
 	];
 
+	// Map rocketDefs id to the display name used here
+	const rocketIdToName: Record<string, string> = {};
+	for (const rd of rocketDefs) rocketIdToName[rd.id] = rd.name;
+
+	let ownedRocketCounts = $derived.by(() => {
+		const counts: Record<string, number> = {};
+		for (const [id, count] of Object.entries($rocketInventory)) {
+			if (count <= 0) continue;
+			const name = rocketIdToName[id];
+			if (name) counts[name] = count;
+		}
+		return counts;
+	});
+
 	const rocketOptions: RocketOption[] = [
 		{ name: 'Starship / Super Heavy', payloadLEO: 150000, fairingVolume_m3: 1000, costPerLaunch: 10 },
 		{ name: 'Falcon Heavy', payloadLEO: 63800, fairingVolume_m3: 145, costPerLaunch: 97 },
@@ -59,30 +93,24 @@
 		{ name: 'Terran R', payloadLEO: 33500, fairingVolume_m3: 160, costPerLaunch: 55 },
 	];
 
-	const payloadOptions: PayloadOption[] = [
-		{ name: 'Comm Relay Satellite', mass: 5500, volume_m3: 16, cost: 120 },
-		{ name: 'Navigation Constellation Sat', mass: 1200, volume_m3: 2, cost: 45 },
-		{ name: 'Scientific Surveyor', mass: 3200, volume_m3: 12, cost: 280 },
-		{ name: 'Atmospheric Probe', mass: 800, volume_m3: 1.8, cost: 95 },
-		{ name: 'Weather & Climate Monitor', mass: 2800, volume_m3: 12, cost: 150 },
-		{ name: 'Fuel Depot Module', mass: 12000, volume_m3: 127, cost: 350 },
-		{ name: 'Solar Power Array', mass: 8000, volume_m3: 18, cost: 180 },
-		{ name: 'Orbital Drydock Truss', mass: 25000, volume_m3: 1280, cost: 600 },
-		{ name: 'Mass Driver Segment', mass: 18000, volume_m3: 135, cost: 420 },
-		{ name: 'LEO Habitat Module', mass: 20000, volume_m3: 160, cost: 450 },
-		{ name: 'Lunar Surface Habitat', mass: 15000, volume_m3: 157, cost: 520 },
-		{ name: 'Venus Floating Habitat', mass: 9000, volume_m3: 50, cost: 680 },
-		{ name: 'Mars Surface Habitat', mass: 22000, volume_m3: 283, cost: 580 },
-		{ name: 'Deep-Space Transit Hab', mass: 35000, volume_m3: 236, cost: 900 },
-		{ name: 'Crew Reentry Vehicle', mass: 9000, volume_m3: 48, cost: 210 },
-		{ name: 'Lunar Lander (Cargo)', mass: 11000, volume_m3: 88, cost: 320 },
-		{ name: 'Mars Cargo Lander', mass: 14000, volume_m3: 157, cost: 380 },
-		{ name: 'Orbital Tug (Ion)', mass: 3500, volume_m3: 12.5, cost: 140 },
-		{ name: 'Crew Consumables Pod', mass: 6000, volume_m3: 14.7, cost: 35 },
-		{ name: 'ISRU Equipment Pack', mass: 8500, volume_m3: 24, cost: 200 },
-		{ name: 'Construction Material Pallet', mass: 20000, volume_m3: 48, cost: 25 },
-		{ name: 'Nuclear Fission Power Unit', mass: 7500, volume_m3: 9.4, cost: 500 },
-	];
+	// Build payload inventory counts by name for display
+	let payloadInvByName = $derived.by(() => {
+		const counts: Record<string, number> = {};
+		const allDefs = [...marketSatellites, ...venMarsPayloads, ...$customPayloads];
+		for (const [id, count] of Object.entries($payloadInventory)) {
+			if (count <= 0) continue;
+			const def = allDefs.find(d => d.id === id);
+			if (def) counts[def.name] = (counts[def.name] ?? 0) + count;
+		}
+		return counts;
+	});
+
+	const payloadOptions: PayloadOption[] = [...marketSatellites, ...venMarsPayloads].map(d => ({
+		name: d.name,
+		mass: d.mass,
+		volume_m3: d.volume_m3,
+		cost: d.cost,
+	}));
 
 	const fuelOptions: FuelOption[] = [
 		{ name: 'LOX (Liquid Oxygen)', density_kg_m3: 1141, cost_per_m3: 0.2 },
@@ -176,7 +204,9 @@
 			<select class="selector" bind:value={selectedSite}>
 				<option value="">— Select launch site —</option>
 				{#each launchSites as site}
-					<option value={site.name}>{site.name} ({site.lat})</option>
+					<option value={site.name} class:owned-option={ownedSiteNames.has(site.name)}>
+						{ownedSiteNames.has(site.name) ? '★ ' : ''}{site.name} ({site.lat}){ownedSiteNames.has(site.name) ? ' — OWNED' : ''}
+					</option>
 				{/each}
 			</select>
 		</div>
@@ -187,7 +217,10 @@
 			<select class="selector" bind:value={selectedRocket}>
 				<option value="">— Select rocket —</option>
 				{#each rocketOptions as rocket}
-					<option value={rocket.name}>{rocket.name} — {formatMass(rocket.payloadLEO)} / {rocket.fairingVolume_m3} m³ — ${rocket.costPerLaunch}M</option>
+					{@const owned = ownedRocketCounts[rocket.name] ?? 0}
+					<option value={rocket.name} class:owned-option={owned > 0}>
+						{owned > 0 ? `★ ` : ''}{rocket.name} — {formatMass(rocket.payloadLEO)} / {rocket.fairingVolume_m3} m³ — ${rocket.costPerLaunch}M{owned > 0 ? ` — ×${owned} OWNED` : ''}
+					</option>
 				{/each}
 			</select>
 		</div>
@@ -198,9 +231,13 @@
 		<h4 class="section-title">3. Select Payloads</h4>
 		<div class="payload-checklist">
 			{#each payloadOptions as p}
-				<label class="payload-check" class:selected={selectedPayloads.includes(p.name)} class:over-constraint={overAny && selectedPayloads.includes(p.name)}>
+				{@const invCount = payloadInvByName[p.name] ?? 0}
+				<label class="payload-check" class:selected={selectedPayloads.includes(p.name)} class:over-constraint={overAny && selectedPayloads.includes(p.name)} class:has-inventory={invCount > 0}>
 					<input type="checkbox" checked={selectedPayloads.includes(p.name)} onchange={() => togglePayload(p.name)} />
 					<span class="check-name">{p.name}</span>
+					{#if invCount > 0}
+						<span class="check-inv">×{invCount}</span>
+					{/if}
 					<span class="check-mass">{formatMass(p.mass)}</span>
 					<span class="check-vol">{p.volume_m3} m³</span>
 					<span class="check-cost">${p.cost}M</span>
@@ -370,9 +407,13 @@
 		border-color: var(--color-text-dim);
 	}
 
+	.owned-option {
+		font-weight: 700;
+	}
+
 	.payload-checklist {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
 		gap: 0.25rem;
 		max-height: 260px;
 		overflow-y: auto;
@@ -381,7 +422,7 @@
 
 	.payload-check {
 		display: grid;
-		grid-template-columns: auto 1fr auto auto auto;
+		grid-template-columns: auto 1fr auto auto auto auto;
 		align-items: center;
 		gap: 0.4rem;
 		padding: 0.25rem 0.4rem;
@@ -401,6 +442,13 @@
 	.payload-check.over-constraint {
 		border-color: rgba(239, 68, 68, 0.4);
 	}
+	.payload-check.has-inventory {
+		background: rgba(74, 222, 128, 0.06);
+		border-color: rgba(74, 222, 128, 0.25);
+	}
+	.payload-check.has-inventory:hover {
+		background: rgba(74, 222, 128, 0.12);
+	}
 
 	.payload-check input[type="checkbox"] {
 		accent-color: #6366f1;
@@ -408,6 +456,16 @@
 	}
 
 	.check-name { font-weight: 500; }
+	.check-inv {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.6rem;
+		font-weight: 700;
+		color: #60a5fa;
+		background: rgba(59, 130, 246, 0.15);
+		padding: 0.05rem 0.3rem;
+		border-radius: 999px;
+		border: 1px solid rgba(59, 130, 246, 0.25);
+	}
 	.check-mass { color: var(--color-text-dim); font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; }
 	.check-vol { color: var(--color-text-dim); font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; }
 	.check-cost { color: var(--color-text-dim); font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; }

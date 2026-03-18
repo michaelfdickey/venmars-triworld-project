@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { difficulty, difficultyConfig, spendingAllocations, spendingReserves, claimedComplexes, launchComplexProfiles, rocketDefs, rocketInventory } from '$lib/stores/gameStore';
+	import { difficulty, difficultyConfig, spendingAllocations, spendingReserves, claimedComplexes, launchComplexProfiles, rocketDefs, rocketInventory, materialDefs, materialAllocations, materialCostB } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -86,12 +86,40 @@
 		rocketMaintCosts.reduce((sum, c) => sum + c.costB, 0)
 	);
 
+	// ── Material procurement demands per spending category ──
+	// Group materialDefs costs by their spendingCategoryIndex
+	let materialCostsByCategory = $derived.by(() => {
+		const byCat: Record<number, CostDemandItem[]> = {};
+		const allocs = $materialAllocations;
+		for (let i = 0; i < materialDefs.length; i++) {
+			const m = materialDefs[i];
+			const pct = allocs[i] ?? 0;
+			if (pct <= 0) continue;
+			const cost = materialCostB(i, pct);
+			if (cost <= 0) continue;
+			const cat = m.spendingCategoryIndex;
+			if (!byCat[cat]) byCat[cat] = [];
+			byCat[cat].push({ name: m.name, costB: cost, color: m.color });
+		}
+		return byCat;
+	});
+
+	let materialDemandByCategory = $derived.by(() => {
+		const demands: Record<number, number> = {};
+		for (const [cat, items] of Object.entries(materialCostsByCategory)) {
+			demands[Number(cat)] = items.reduce((s, it) => s + it.costB, 0);
+		}
+		return demands;
+	});
+
 	// Cost demand per category (in $B).
-	// Demands come from actual consumption drivers (claimed complexes, owned rockets, etc.)
+	// Demands come from actual consumption drivers (claimed complexes, owned rockets, material procurement, etc.)
 	function getCostDemandB(catIndex: number): number {
-		if (catIndex === 0) return launchInfraDemandB;
-		if (catIndex === 1) return rocketMaintDemandB;
-		return 0; // other categories gain demands as game mechanics are built
+		let demand = 0;
+		if (catIndex === 0) demand += launchInfraDemandB;
+		if (catIndex === 1) demand += rocketMaintDemandB;
+		demand += materialDemandByCategory[catIndex] ?? 0;
+		return demand;
 	}
 
 	// ── Detail modal state ──
@@ -122,6 +150,9 @@
 		const items: CostDemandItem[] = [];
 		if (detailModalIndex === 0) items.push(...claimedLaunchCosts);
 		if (detailModalIndex === 1) items.push(...rocketMaintCosts);
+		// Add material procurement items for this category
+		const matItems = materialCostsByCategory[detailModalIndex];
+		if (matItems) items.push(...matItems);
 		const totalDemand = items.reduce((s, it) => s + it.costB, 0);
 
 		if (allocated <= 0 && totalDemand <= 0) return [];

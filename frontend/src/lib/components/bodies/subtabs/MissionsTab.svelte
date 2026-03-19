@@ -1,5 +1,11 @@
+<script module lang="ts">
+	/** Module-level cache survives component unmount/remount on tab switch */
+	let _cache: Record<string, any> | null = null;
+</script>
+
 <script lang="ts">
-	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, reservedRockets, payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, type DeployMethod } from '$lib/stores/gameStore';
+	import { onDestroy } from 'svelte';
+	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, reservedRockets, payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, reuseModeLabels, type DeployMethod, type ReuseMode, type PayloadByOrbit } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -17,6 +23,7 @@
 		fairingDiameter_m: number;
 		costPerLaunch: number;
 		maxDeltaV_ms: number;
+		payloadByMode: Record<ReuseMode, PayloadByOrbit | null>;
 	}
 
 	interface PayloadOption {
@@ -66,6 +73,7 @@
 		type: ActivityType;
 		notes: string;
 		targetAlt?: number;  // km — used by change-orbit
+		targetInc?: number;  // deg — used by plane-change
 	}
 
 	// DeployMethod type imported from gameStore
@@ -98,6 +106,7 @@
 		activities: MissionActivity[];
 		launchWindow: LaunchWindow;
 		deployMethod: DeployMethod;
+		reuseMode: ReuseMode;
 	}
 
 	type MissionStatus = 'pending' | 'in-transit' | 'completed' | 'failed';
@@ -155,6 +164,7 @@
 		fairingDiameter_m: rd.fairingDiameter_m,
 		costPerLaunch: rd.costPerLaunch,
 		maxDeltaV_ms: rd.maxDeltaV_ms,
+		payloadByMode: rd.payloadByMode,
 	}));
 
 	let ownedRocketCounts = $derived.by(() => {
@@ -291,11 +301,12 @@
 		const rPe = (EARTH_R + peKm) * 1000;
 		const rAp = (EARTH_R + apKm) * 1000;
 		const a = (rPe + rAp) / 2;
-		// velocity at apoapsis on the transfer orbit
-		const vAp = Math.sqrt(EARTH_MU * (2 / rAp - 1 / a));
-		// circular velocity at apoapsis altitude
-		const vCirc = Math.sqrt(EARTH_MU / rAp);
-		return Math.abs(vCirc - vAp);
+		// Hohmann transfer: burn at periapsis + burn at apoapsis
+		const vCircPe = Math.sqrt(EARTH_MU / rPe);
+		const vTransPe = Math.sqrt(EARTH_MU * (2 / rPe - 1 / a));
+		const vTransAp = Math.sqrt(EARTH_MU * (2 / rAp - 1 / a));
+		const vCircAp = Math.sqrt(EARTH_MU / rAp);
+		return Math.abs(vTransPe - vCircPe) + Math.abs(vCircAp - vTransAp);
 	}
 
 	// ΔV for a plane change at given altitude and angle
@@ -352,10 +363,10 @@
 				return (dm?.deltaVOverhead ?? 5) * Math.max(1, selectedPayloads.length);
 			}
 			case 'plane-change': {
-				// ΔV to change from launch site latitude to target inclination
-				const siteLatMatch = selectedSite ? launchSites.find(s => s.name === selectedSite) : null;
-				const siteLat = siteLatMatch ? parseFloat(siteLatMatch.lat) : 28.5;
-				const angleChange = Math.abs(orbitInclination - siteLat);
+				// ΔV for inclination change at current orbit altitude
+				const currentInc = orbitInclination;
+				const targetInc = act.targetInc ?? currentInc;
+				const angleChange = Math.abs(targetInc - currentInc);
 				const alt = selectedOrbit?.circular ? orbitAltitude : (orbitPeriapsis + orbitApoapsis) / 2;
 				return dvPlaneChange(alt, angleChange);
 			}
@@ -397,6 +408,7 @@
 	// ── State ─────────────────────────────────────────────
 	let selectedSite = $state('');
 	let selectedRocket = $state('');
+	let selectedReuseMode = $state<ReuseMode>('expendable');
 	let selectedPayloads = $state<string[]>([]);
 	let selectedFuel = $state('');
 
@@ -435,6 +447,63 @@
 	]);
 	let selectedDeployMethod = $state<DeployMethod>('spin-stabilized');
 
+	// ── Restore persisted state from module cache ────────
+	if (_cache) {
+		selectedSite = _cache.selectedSite;
+		selectedRocket = _cache.selectedRocket;
+		selectedReuseMode = _cache.selectedReuseMode;
+		selectedPayloads = _cache.selectedPayloads;
+		selectedFuel = _cache.selectedFuel;
+		missionName = _cache.missionName;
+		savedMissions = _cache.savedMissions;
+		loadedMissionIndex = _cache.loadedMissionIndex;
+		selectedBody = _cache.selectedBody;
+		selectedOrbitId = _cache.selectedOrbitId;
+		orbitAltitude = _cache.orbitAltitude;
+		orbitInclination = _cache.orbitInclination;
+		orbitApoapsis = _cache.orbitApoapsis;
+		orbitPeriapsis = _cache.orbitPeriapsis;
+		missionSubTab = _cache.missionSubTab;
+		scheduledMissions = _cache.scheduledMissions;
+		completedMissions = _cache.completedMissions;
+		nextMissionId = _cache.nextMissionId;
+		missionMode = _cache.missionMode;
+		launchDate = _cache.launchDate;
+		repeatIntervalDays = _cache.repeatIntervalDays;
+		launchWindow = _cache.launchWindow;
+		missionActivities = _cache.missionActivities;
+		selectedDeployMethod = _cache.selectedDeployMethod;
+	}
+
+	onDestroy(() => {
+		_cache = {
+			selectedSite,
+			selectedRocket,
+			selectedReuseMode,
+			selectedPayloads,
+			selectedFuel,
+			missionName,
+			savedMissions,
+			loadedMissionIndex,
+			selectedBody,
+			selectedOrbitId,
+			orbitAltitude,
+			orbitInclination,
+			orbitApoapsis,
+			orbitPeriapsis,
+			missionSubTab,
+			scheduledMissions,
+			completedMissions,
+			nextMissionId,
+			missionMode,
+			launchDate,
+			repeatIntervalDays,
+			launchWindow,
+			missionActivities,
+			selectedDeployMethod,
+		};
+	});
+
 	// ── Auto-generate mission name ───────────────────────
 	function autoGenerateName(): string {
 		const dest = selectedOrbit?.name?.split('(')[0]?.trim() ?? selectedBody;
@@ -465,6 +534,7 @@
 			activities: missionActivities.map(a => ({ ...a })),
 			launchWindow,
 			deployMethod: selectedDeployMethod,
+			reuseMode: selectedReuseMode,
 		};
 		if (loadedMissionIndex !== null) {
 			savedMissions[loadedMissionIndex] = mission;
@@ -496,6 +566,7 @@
 		missionActivities = m.activities.map(a => ({ ...a }));
 		launchWindow = m.launchWindow;
 		selectedDeployMethod = m.deployMethod;
+		selectedReuseMode = m.reuseMode ?? 'expendable';
 		loadedMissionIndex = index;
 	}
 
@@ -509,6 +580,7 @@
 		missionName = '';
 		selectedSite = '';
 		selectedRocket = '';
+		selectedReuseMode = 'expendable';
 		selectedPayloads = [];
 		selectedFuel = '';
 		selectedBody = 'earth';
@@ -595,6 +667,7 @@
 			activities: missionActivities.map(a => ({ ...a })),
 			launchWindow,
 			deployMethod: selectedDeployMethod,
+			reuseMode: selectedReuseMode,
 			status: 'pending',
 			totalDeltaV: totalDeltaV,
 			totalCost: totalMissionCost,
@@ -639,6 +712,7 @@
 		missionActivities = m.activities.map(a => ({ ...a }));
 		launchWindow = m.launchWindow;
 		selectedDeployMethod = m.deployMethod;
+		selectedReuseMode = m.reuseMode ?? 'expendable';
 		loadedMissionIndex = null;
 		// Remove from scheduled since we're editing it
 		scheduledMissions = scheduledMissions.filter((_, i) => i !== index);
@@ -711,6 +785,23 @@
 	}
 
 	let chosenRocket = $derived(rocketOptions.find(r => r.name === selectedRocket));
+	let availableReuseModes = $derived.by(() => {
+		if (!chosenRocket) return [] as ReuseMode[];
+		return (['expendable', 'booster-reuse', 'full-reuse'] as ReuseMode[]).filter(m => chosenRocket.payloadByMode[m] !== null);
+	});
+	let effectivePayloadLEO = $derived.by(() => {
+		if (!chosenRocket) return 0;
+		const modeData = chosenRocket.payloadByMode[selectedReuseMode];
+		if (modeData) return modeData.LEO;
+		return chosenRocket.payloadLEO;
+	});
+	$effect(() => {
+		// Auto-select a valid reuse mode whenever the rocket changes
+		if (availableReuseModes.length && !availableReuseModes.includes(selectedReuseMode)) {
+			selectedReuseMode = availableReuseModes[0];
+		}
+	});
+
 	let chosenFuel = $derived(fuelOptions.find(f => f.name === selectedFuel));
 	let chosenPayloadItems = $derived(selectedPayloads.map(n => payloadOptions.find(p => p.name === n)).filter(Boolean) as PayloadOption[]);
 
@@ -718,7 +809,7 @@
 	let totalPayloadVolume = $derived(chosenPayloadItems.reduce((s, p) => s + p.volume_m3, 0));
 	let totalPayloadCost = $derived(chosenPayloadItems.reduce((s, p) => s + p.cost, 0));
 
-	let remainingMass = $derived(chosenRocket ? chosenRocket.payloadLEO - totalPayloadMass : 0);
+	let remainingMass = $derived(chosenRocket ? effectivePayloadLEO - totalPayloadMass : 0);
 	let remainingVolume = $derived(chosenRocket ? chosenRocket.fairingVolume_m3 - totalPayloadVolume : 0);
 	let usableFuelVolume = $derived(Math.max(0, remainingVolume * FUEL_PACKING_EFFICIENCY));
 
@@ -747,18 +838,18 @@
 	let grandTotalVolume = $derived(totalPayloadVolume + fuelVolume_m3());
 	let totalMissionCost = $derived(totalPayloadCost + fuelCost() + (chosenRocket?.costPerLaunch ?? 0));
 
-	let overMass = $derived(chosenRocket ? totalPayloadMass > chosenRocket.payloadLEO : false);
+	let overMass = $derived(chosenRocket ? totalPayloadMass > effectivePayloadLEO : false);
 	let overVolume = $derived(chosenRocket ? totalPayloadVolume > chosenRocket.fairingVolume_m3 : false);
 	let overDeltaV = $derived(chosenRocket ? totalDeltaV > chosenRocket.maxDeltaV_ms : false);
 	let overAny = $derived(overMass || overVolume || overDeltaV);
 
-	let massPercent = $derived(chosenRocket ? (grandTotalMass / chosenRocket.payloadLEO) * 100 : 0);
+	let massPercent = $derived(chosenRocket ? (grandTotalMass / effectivePayloadLEO) * 100 : 0);
 	let volumePercent = $derived(chosenRocket ? (grandTotalVolume / chosenRocket.fairingVolume_m3) * 100 : 0);
 	let deltaVPercent = $derived(chosenRocket ? (totalDeltaV / chosenRocket.maxDeltaV_ms) * 100 : 0);
 
 	let launchesNeeded = $derived(
 		chosenRocket && totalPayloadMass > 0
-			? Math.ceil(totalPayloadMass / chosenRocket.payloadLEO)
+			? Math.ceil(totalPayloadMass / effectivePayloadLEO)
 			: 0
 	);
 
@@ -845,6 +936,31 @@
 		</div>
 	</div>
 
+	<!-- Reusability Mode -->
+	{#if chosenRocket}
+		<div class="reuse-mode-bar mt-2">
+			{#each (['expendable', 'booster-reuse', 'full-reuse'] as const) as mode}
+				{@const modeData = chosenRocket.payloadByMode[mode]}
+				{@const available = modeData !== null}
+				<button
+					class="reuse-btn"
+					class:active={selectedReuseMode === mode}
+					class:unavailable={!available}
+					disabled={!available}
+					onclick={() => { if (available) selectedReuseMode = mode; }}
+				>
+					<span class="reuse-icon">{mode === 'expendable' ? '🗑️' : mode === 'booster-reuse' ? '♻️' : '♻️♻️'}</span>
+					<span class="reuse-label">{reuseModeLabels[mode]}</span>
+					{#if modeData}
+						<span class="reuse-cap">{formatMass(modeData.LEO)}</span>
+					{:else}
+						<span class="reuse-cap unavail-text">N/A</span>
+					{/if}
+				</button>
+			{/each}
+		</div>
+	{/if}
+
 	<!-- Payloads -->
 	<div class="designer-section mt-3">
 		<h4 class="section-title">3. Select Payloads</h4>
@@ -903,7 +1019,7 @@
 		<div class="capacity-bars mt-3">
 			{#if overMass}
 				<div class="mass-warning">
-					⚠ Payload exceeds vehicle mass capacity by {formatMass(totalPayloadMass - chosenRocket.payloadLEO)}.
+					⚠ Payload exceeds vehicle mass capacity by {formatMass(totalPayloadMass - effectivePayloadLEO)}.
 				</div>
 			{/if}
 			{#if overVolume}
@@ -912,7 +1028,7 @@
 				</div>
 			{/if}
 			<div class="bar-label-row">
-				<span class="bar-title">Mass — {formatMass(grandTotalMass)} / {formatMass(chosenRocket.payloadLEO)}</span>
+				<span class="bar-title">Mass — {formatMass(grandTotalMass)} / {formatMass(effectivePayloadLEO)}</span>
 				<span class="bar-pct">{massPercent.toFixed(0)}%</span>
 			</div>
 			<div class="mass-bar-container">
@@ -998,7 +1114,8 @@
 							stroke-width={fv.fd * 0.012}
 						/>
 						{#if pg.height > fv.fd * 0.12}
-							<text x={px + pg.height / 2} y={cy}
+							{@const stagger = (i % 3 - 1) * pg.dia * 0.22}
+							<text x={px + pg.height / 2} y={cy + stagger}
 								text-anchor="middle" dominant-baseline="middle"
 								font-size={Math.min(fv.fd * 0.1, pg.dia * 0.35, pg.height * 0.15)}
 								fill={pg.color} font-weight="600"
@@ -1240,6 +1357,26 @@
 							/>
 							<span class="activity-param-unit">km</span>
 						</div>
+					{:else if act.type === 'plane-change'}
+						<div class="activity-param">
+							<span class="activity-param-label">Target inc:</span>
+							<input
+								class="activity-param-input"
+								type="number"
+								min="0"
+								max="180"
+								step="0.1"
+								value={act.targetInc ?? orbitInclination}
+								oninput={(e) => {
+									const val = parseFloat((e.target as HTMLInputElement).value);
+									if (!isNaN(val)) {
+										missionActivities[i].targetInc = val;
+										missionActivities = [...missionActivities];
+									}
+								}}
+							/>
+							<span class="activity-param-unit">deg</span>
+						</div>
 					{:else}
 						<span class="activity-desc">{def?.description ?? ''}</span>
 					{/if}
@@ -1386,7 +1523,7 @@
 				{#if chosenRocket}
 					<div class="summary-item">
 						<span class="sum-label">Vehicle Capacity</span>
-						<span class="sum-value">{formatMass(chosenRocket.payloadLEO)} / {chosenRocket.fairingVolume_m3} m³</span>
+						<span class="sum-value">{formatMass(effectivePayloadLEO)} / {chosenRocket.fairingVolume_m3} m³</span>
 					</div>
 					<div class="summary-item">
 						<span class="sum-label">Launches Required</span>
@@ -1502,6 +1639,40 @@
 		grid-template-columns: 1fr 1fr;
 		gap: 0.75rem;
 	}
+
+	.reuse-mode-bar {
+		display: flex;
+		gap: 0.4rem;
+	}
+	.reuse-btn {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.15rem;
+		padding: 0.4rem 0.3rem;
+		border-radius: 0.375rem;
+		border: 1px solid var(--color-border);
+		background: var(--color-bg-panel);
+		color: var(--color-text-dim);
+		cursor: pointer;
+		transition: all 0.15s;
+		font-size: 0.65rem;
+	}
+	.reuse-btn:hover:not(:disabled) { border-color: var(--color-text-dim); }
+	.reuse-btn.active {
+		border-color: #6366f1;
+		background: rgba(99, 102, 241, 0.1);
+		color: var(--color-text);
+	}
+	.reuse-btn.unavailable {
+		opacity: 0.35;
+		cursor: not-allowed;
+	}
+	.reuse-icon { font-size: 0.9rem; }
+	.reuse-label { font-weight: 600; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em; }
+	.reuse-cap { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.6rem; color: #60a5fa; }
+	.unavail-text { color: var(--color-text-dim); }
 
 	.designer-section {
 		display: flex;

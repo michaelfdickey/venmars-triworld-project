@@ -262,7 +262,7 @@
 										<rect x="14" y="1.5" width="120" height="6" rx="2" fill={rocket.color} opacity="0.15"/>
 										<rect x="16" y="2.5" width="116" height="4" rx="2" fill="#fb923c" opacity="0.55"/>
 										<!-- Core body -->
-										<rect x="12" y="9" width="88" height="12" rx="2" fill={rocket.color} opacity="0.3"/>
+									<rect x="12" y="9" width="148" height="12" rx="2" fill={rocket.color} opacity="0.3"/>
 										<!-- S1 tank -->
 										{#if fuel?.s3}
 											<rect x="14" y="10.5" width="51" height="9" rx="4" fill={'url(#' + rocket.id + '-s1)'} opacity="0.8"/>

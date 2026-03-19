@@ -14,6 +14,7 @@
 		name: string;
 		payloadLEO: number;
 		fairingVolume_m3: number;
+		fairingDiameter_m: number;
 		costPerLaunch: number;
 	}
 
@@ -21,6 +22,7 @@
 		name: string;
 		mass: number;
 		volume_m3: number;
+		diameter_m: number;
 		cost: number;
 	}
 
@@ -96,6 +98,15 @@
 		deployMethod: DeployMethod;
 	}
 
+	type MissionStatus = 'pending' | 'in-transit' | 'completed' | 'failed';
+
+	interface ScheduledMission extends SavedMission {
+		id: number;
+		status: MissionStatus;
+		totalDeltaV: number;
+		totalCost: number;
+	}
+
 	const FUEL_PACKING_EFFICIENCY = 0.80;
 
 	// ── Launch Sites ──────────────────────────────────────
@@ -139,6 +150,7 @@
 		name: rd.name,
 		payloadLEO: rd.payloadLEO,
 		fairingVolume_m3: rd.fairingVolume_m3,
+		fairingDiameter_m: rd.fairingDiameter_m,
 		costPerLaunch: rd.costPerLaunch,
 	}));
 
@@ -168,6 +180,7 @@
 		name: d.name,
 		mass: d.mass,
 		volume_m3: d.volume_m3,
+		diameter_m: d.diameter_m,
 		cost: d.cost,
 	}));
 
@@ -380,6 +393,14 @@
 	let orbitApoapsis = $state(400);
 	let orbitPeriapsis = $state(400);
 
+	// Sub-tab navigation
+	let missionSubTab = $state<'designer' | 'scheduled' | 'completed'>('designer');
+
+	// Scheduled & completed missions
+	let scheduledMissions = $state<ScheduledMission[]>([]);
+	let completedMissions = $state<ScheduledMission[]>([]);
+	let nextMissionId = $state(1);
+
 	// Schedule
 	let missionMode = $state<'one-off' | 'repeating'>('one-off');
 	let launchDate = $state('2031-01-15');
@@ -487,6 +508,67 @@
 		launchWindow = 'next-optimal';
 		selectedDeployMethod = 'spin-stabilized';
 		loadedMissionIndex = null;
+	}
+
+	// ── Schedule / Cancel / Load Scheduled ────────────────
+	function scheduleMission() {
+		const name = missionName || autoGenerateName();
+		const scheduled: ScheduledMission = {
+			id: nextMissionId++,
+			name,
+			site: selectedSite,
+			rocket: selectedRocket,
+			payloads: [...selectedPayloads],
+			fuel: selectedFuel,
+			body: selectedBody,
+			orbitId: selectedOrbitId,
+			altitude: orbitAltitude,
+			inclination: orbitInclination,
+			apoapsis: orbitApoapsis,
+			periapsis: orbitPeriapsis,
+			mode: missionMode,
+			date: launchDate,
+			repeatDays: repeatIntervalDays,
+			activities: missionActivities.map(a => ({ ...a })),
+			launchWindow,
+			deployMethod: selectedDeployMethod,
+			status: 'pending',
+			totalDeltaV: totalDeltaV,
+			totalCost: totalMissionCost,
+		};
+		scheduledMissions = [...scheduledMissions, scheduled];
+		missionSubTab = 'scheduled';
+		newMission();
+	}
+
+	function cancelScheduledMission(index: number) {
+		scheduledMissions = scheduledMissions.filter((_, i) => i !== index);
+	}
+
+	function loadScheduledToDesigner(index: number) {
+		const m = scheduledMissions[index];
+		if (!m) return;
+		missionName = m.name;
+		selectedSite = m.site;
+		selectedRocket = m.rocket;
+		selectedPayloads = [...m.payloads];
+		selectedFuel = m.fuel;
+		selectedBody = m.body;
+		selectedOrbitId = m.orbitId;
+		orbitAltitude = m.altitude;
+		orbitInclination = m.inclination;
+		orbitApoapsis = m.apoapsis;
+		orbitPeriapsis = m.periapsis;
+		missionMode = m.mode;
+		launchDate = m.date;
+		repeatIntervalDays = m.repeatDays;
+		missionActivities = m.activities.map(a => ({ ...a }));
+		launchWindow = m.launchWindow;
+		selectedDeployMethod = m.deployMethod;
+		loadedMissionIndex = null;
+		// Remove from scheduled since we're editing it
+		scheduledMissions = scheduledMissions.filter((_, i) => i !== index);
+		missionSubTab = 'designer';
 	}
 
 	// ── Total ΔV ─────────────────────────────────────────
@@ -614,10 +696,50 @@
 		if (km >= 10000) return (km / 1000).toFixed(0) + 'k km';
 		return km.toLocaleString() + ' km';
 	}
+
+	// ── Fairing Visualization ─────────────────────────────
+	const PAYLOAD_COLORS = ['#6366f1', '#ec4899', '#14b8a6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16'];
+
+	let fairingViz = $derived.by(() => {
+		if (!chosenRocket || chosenPayloadItems.length === 0) return null;
+		const fd = chosenRocket.fairingDiameter_m;
+		const fr = fd / 2;
+		const fv = chosenRocket.fairingVolume_m3;
+		const noseH = fd * 1.5;
+		const noseV = (1 / 3) * Math.PI * fr * fr * noseH;
+		const cylV = Math.max(0, fv - noseV);
+		const cylH = cylV / (Math.PI * fr * fr);
+
+		const payloads = chosenPayloadItems.map((p, i) => {
+			const pd = Math.min(p.diameter_m, fd * 0.92);
+			const pr = pd / 2;
+			const ph = p.volume_m3 / (Math.PI * pr * pr);
+			return { name: p.name, dia: pd, height: ph, color: PAYLOAD_COLORS[i % PAYLOAD_COLORS.length] };
+		});
+		const gap = 0.15;
+		const payloadStackH = payloads.reduce((s, p) => s + p.height, 0) + Math.max(0, payloads.length - 1) * gap;
+		const effCylH = Math.max(cylH, payloadStackH + 0.5);
+		return { fd, fr, noseH, cylH: effCylH, totalH: noseH + effCylH, payloads, gap, fairingVol: fv };
+	});
 </script>
 
 <div class="missions-tab">
-	<h3 class="text-lg font-semibold mb-3">Mission Designer</h3>
+	<!-- Sub-tab bar -->
+	<div class="mission-tab-bar">
+		<button class="mission-tab" class:active={missionSubTab === 'designer'} onclick={() => missionSubTab = 'designer'}>
+			🛠️ Designer
+		</button>
+		<button class="mission-tab" class:active={missionSubTab === 'scheduled'} onclick={() => missionSubTab = 'scheduled'}>
+			📅 Scheduled
+			{#if scheduledMissions.length > 0}<span class="tab-badge">{scheduledMissions.length}</span>{/if}
+		</button>
+		<button class="mission-tab" class:active={missionSubTab === 'completed'} onclick={() => missionSubTab = 'completed'}>
+			✅ Completed
+			{#if completedMissions.length > 0}<span class="tab-badge">{completedMissions.length}</span>{/if}
+		</button>
+	</div>
+
+	{#if missionSubTab === 'designer'}
 
 	<!-- Row 1: Launch Site + Launch Vehicle -->
 	<div class="designer-grid">
@@ -661,6 +783,7 @@
 					{/if}
 					<span class="check-mass">{formatMass(p.mass)}</span>
 					<span class="check-vol">{p.volume_m3} m³</span>
+					<span class="check-dia">⌀{p.diameter_m}m</span>
 					<span class="check-cost">${p.cost}M</span>
 				</label>
 			{/each}
@@ -725,6 +848,89 @@
 			</div>
 			<div class="mass-bar-container">
 				<div class="mass-bar" style="width: {Math.min(100, volumePercent)}%" class:bar-ok={!overVolume} class:bar-over={overVolume}></div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Fairing Payload Visualization -->
+	{#if fairingViz}
+		{@const fv = fairingViz}
+		{@const pad = 1}
+		{@const svgW = fv.fd + pad * 2}
+		{@const svgH = fv.totalH + pad * 2}
+		{@const cx = svgW / 2}
+		{@const bottom = svgH - pad}
+		{@const cylTop = bottom - fv.cylH}
+		{@const noseTop = cylTop - fv.noseH}
+		<div class="fairing-viz mt-3">
+			<h4 class="section-title">Fairing Layout</h4>
+			<div class="fairing-svg-wrap">
+				<svg viewBox="0 0 {svgW} {svgH}" class="fairing-svg" preserveAspectRatio="xMidYMid meet">
+					<!-- Fairing shell: nose cone + cylinder -->
+					<path
+						d="M {cx},{noseTop}
+						   C {cx + fv.fr * 0.1},{noseTop + fv.noseH * 0.4} {cx + fv.fr * 0.85},{cylTop - fv.noseH * 0.1} {cx + fv.fr},{cylTop}
+						   L {cx + fv.fr},{bottom}
+						   L {cx - fv.fr},{bottom}
+						   L {cx - fv.fr},{cylTop}
+						   C {cx - fv.fr * 0.85},{cylTop - fv.noseH * 0.1} {cx - fv.fr * 0.1},{noseTop + fv.noseH * 0.4} {cx},{noseTop}"
+						fill="rgba(99, 102, 241, 0.04)"
+						stroke="#6366f1"
+						stroke-width={fv.fd * 0.018}
+						opacity="0.7"
+					/>
+					<!-- Cone/cylinder separation line -->
+					<line
+						x1={cx - fv.fr} y1={cylTop} x2={cx + fv.fr} y2={cylTop}
+						stroke="#6366f1" stroke-width={fv.fd * 0.008}
+						stroke-dasharray="{fv.fd * 0.04} {fv.fd * 0.04}" opacity="0.25"
+					/>
+					<!-- Diameter annotation -->
+					<line x1={cx - fv.fr} y1={bottom + pad * 0.4} x2={cx + fv.fr} y2={bottom + pad * 0.4}
+						stroke="#a5b4fc" stroke-width={fv.fd * 0.008} />
+					<text x={cx} y={bottom + pad * 0.7}
+						text-anchor="middle" font-size={fv.fd * 0.13}
+						fill="#a5b4fc" font-family="'JetBrains Mono', monospace"
+						font-weight="600">⌀{fv.fd}m
+					</text>
+
+					<!-- Payloads stacked from bottom -->
+					{#each fv.payloads as pg, i}
+						{@const yOffset = fv.payloads.slice(0, i).reduce((s, p) => s + p.height + fv.gap, 0)}
+						{@const py = bottom - 0.25 - yOffset - pg.height}
+						{@const px = cx - pg.dia / 2}
+						<rect
+							x={px} y={py}
+							width={pg.dia} height={pg.height}
+							rx={fv.fd * 0.025} ry={fv.fd * 0.025}
+							fill="{pg.color}18"
+							stroke={pg.color}
+							stroke-width={fv.fd * 0.014}
+						/>
+						{#if pg.height > fv.fd * 0.12}
+							<text x={cx} y={py + pg.height / 2}
+								text-anchor="middle" dominant-baseline="middle"
+								font-size={Math.min(fv.fd * 0.1, pg.height * 0.4, pg.dia * 0.22)}
+								fill={pg.color} font-weight="600"
+								font-family="system-ui, sans-serif">
+								{pg.name.length > 18 ? pg.name.slice(0, 16) + '…' : pg.name}
+							</text>
+						{/if}
+					{/each}
+				</svg>
+				<div class="fairing-legend">
+					<div class="fairing-dims">
+						<span class="dim-item">⌀ {fv.fd}m fairing</span>
+						<span class="dim-item">{fv.fairingVol} m³ vol</span>
+					</div>
+					{#each fv.payloads as pg, i}
+						<div class="legend-item">
+							<span class="legend-swatch" style="background: {pg.color}"></span>
+							<span class="legend-name">{pg.name}</span>
+							<span class="legend-dim">⌀{pg.dia.toFixed(1)}m × {pg.height.toFixed(1)}m</span>
+						</div>
+					{/each}
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -972,8 +1178,8 @@
 			<button class="btn-auto-name" onclick={() => missionName = autoGenerateName()} title="Auto-generate name">🎲</button>
 		</div>
 		<div class="action-buttons">
-			<button class="btn-launch" disabled={!selectedSite || !selectedRocket || selectedPayloads.length === 0 || overAny}>
-				🚀 Launch Mission
+			<button class="btn-schedule" onclick={scheduleMission} disabled={!selectedSite || !selectedRocket || selectedPayloads.length === 0 || overAny}>
+				📅 Schedule Mission
 			</button>
 			<button class="btn-save" onclick={saveMission} disabled={!selectedSite || !selectedRocket}>
 				💾 {loadedMissionIndex !== null ? 'Update' : 'Save'} Plan
@@ -1083,6 +1289,95 @@
 			</div>
 		</div>
 	{/if}
+
+	{:else if missionSubTab === 'scheduled'}
+
+	<!-- Scheduled Missions Tab -->
+	<div class="tab-content">
+		<h4 class="tab-content-title">📅 Scheduled Missions ({scheduledMissions.length})</h4>
+		{#if scheduledMissions.length === 0}
+			<p class="empty-state">No missions scheduled yet. Use the Designer tab to create and schedule missions.</p>
+		{:else}
+			<div class="mission-table">
+				<div class="table-header">
+					<span class="th th-name">Mission</span>
+					<span class="th th-vehicle">Vehicle</span>
+					<span class="th th-dest">Destination</span>
+					<span class="th th-date">Date</span>
+					<span class="th th-dv">ΔV</span>
+					<span class="th th-cost">Cost</span>
+					<span class="th th-status">Status</span>
+					<span class="th th-actions"></span>
+				</div>
+				{#each scheduledMissions as sm, i}
+					{@const destInfo = destinations.find(d => d.body === sm.body)}
+					{@const orbitInfo = destInfo?.orbits.find(o => o.id === sm.orbitId)}
+					<div class="table-row" class:status-pending={sm.status === 'pending'} class:status-transit={sm.status === 'in-transit'}>
+						<span class="td td-name">{sm.name}</span>
+						<span class="td td-vehicle">{sm.rocket || '—'}</span>
+						<span class="td td-dest">{destInfo?.icon ?? ''} {orbitInfo?.name?.split('(')[0]?.trim() ?? sm.orbitId}</span>
+						<span class="td td-date">{sm.date}</span>
+						<span class="td td-dv">{sm.totalDeltaV.toFixed(0)} m/s</span>
+						<span class="td td-cost">${sm.totalCost.toLocaleString()}M</span>
+						<span class="td td-status">
+							{#if sm.status === 'pending'}
+								<span class="status-badge pending">⏳ Pending</span>
+							{:else if sm.status === 'in-transit'}
+								<span class="status-badge transit">🚀 In Transit</span>
+							{/if}
+						</span>
+						<span class="td td-actions">
+							<button class="act-btn" onclick={() => loadScheduledToDesigner(i)} title="Edit in Designer">✏️</button>
+							<button class="act-btn act-remove" onclick={() => cancelScheduledMission(i)} title="Cancel Mission">✕</button>
+						</span>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
+	{:else if missionSubTab === 'completed'}
+
+	<!-- Completed Missions Tab -->
+	<div class="tab-content">
+		<h4 class="tab-content-title">✅ Completed Missions ({completedMissions.length})</h4>
+		{#if completedMissions.length === 0}
+			<p class="empty-state">No completed missions yet. Missions will appear here after they reach their destination.</p>
+		{:else}
+			<div class="mission-table">
+				<div class="table-header">
+					<span class="th th-name">Mission</span>
+					<span class="th th-vehicle">Vehicle</span>
+					<span class="th th-dest">Destination</span>
+					<span class="th th-date">Date</span>
+					<span class="th th-dv">ΔV</span>
+					<span class="th th-cost">Cost</span>
+					<span class="th th-status">Status</span>
+				</div>
+				{#each completedMissions as cm}
+					{@const destInfo = destinations.find(d => d.body === cm.body)}
+					{@const orbitInfo = destInfo?.orbits.find(o => o.id === cm.orbitId)}
+					<div class="table-row status-complete">
+						<span class="td td-name">{cm.name}</span>
+						<span class="td td-vehicle">{cm.rocket || '—'}</span>
+						<span class="td td-dest">{destInfo?.icon ?? ''} {orbitInfo?.name?.split('(')[0]?.trim() ?? cm.orbitId}</span>
+						<span class="td td-date">{cm.date}</span>
+						<span class="td td-dv">{cm.totalDeltaV.toFixed(0)} m/s</span>
+						<span class="td td-cost">${cm.totalCost.toLocaleString()}M</span>
+						<span class="td td-status">
+							{#if cm.status === 'completed'}
+								<span class="status-badge complete">✅ Complete</span>
+							{:else if cm.status === 'failed'}
+								<span class="status-badge failed">❌ Failed</span>
+							{/if}
+						</span>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
+	{/if}
 </div>
 
 <style>
@@ -1136,7 +1431,7 @@
 	}
 	.payload-check {
 		display: grid;
-		grid-template-columns: auto 1fr auto auto auto auto;
+		grid-template-columns: auto 1fr auto auto auto auto auto;
 		align-items: center;
 		gap: 0.4rem;
 		padding: 0.25rem 0.4rem;
@@ -1166,7 +1461,7 @@
 		padding: 0.05rem 0.3rem; border-radius: 999px;
 		border: 1px solid rgba(59, 130, 246, 0.25);
 	}
-	.check-mass, .check-vol, .check-cost {
+	.check-mass, .check-vol, .check-cost, .check-dia {
 		color: var(--color-text-dim);
 		font-family: 'JetBrains Mono', monospace;
 		font-size: 0.6rem;
@@ -1461,7 +1756,7 @@
 		padding-top: 0.5rem;
 		border-top: 1px solid var(--color-border);
 	}
-	.btn-launch {
+	.btn-schedule {
 		padding: 0.45rem 1rem;
 		border-radius: 0.375rem;
 		border: 1px solid rgba(74, 222, 128, 0.4);
@@ -1471,8 +1766,8 @@
 		cursor: pointer;
 		transition: all 0.15s;
 	}
-	.btn-launch:hover:not(:disabled) { background: rgba(74, 222, 128, 0.2); }
-	.btn-launch:disabled { opacity: 0.35; cursor: not-allowed; }
+	.btn-schedule:hover:not(:disabled) { background: rgba(74, 222, 128, 0.2); }
+	.btn-schedule:disabled { opacity: 0.35; cursor: not-allowed; }
 	.btn-save {
 		padding: 0.45rem 1rem;
 		border-radius: 0.375rem;
@@ -1600,4 +1895,237 @@
 	.saved-name { font-weight: 600; flex: 1; }
 	.saved-meta { color: var(--color-text-dim); font-size: 0.58rem; font-family: 'JetBrains Mono', monospace; }
 	.saved-actions { display: flex; gap: 0.2rem; flex-shrink: 0; }
+
+	/* ── Mission Sub-Tab Bar ──────────────────────── */
+	.mission-tab-bar {
+		display: flex;
+		gap: 0;
+		border-radius: 0.5rem;
+		overflow: hidden;
+		border: 1px solid var(--color-border);
+		margin-bottom: 0.75rem;
+	}
+	.mission-tab {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.35rem;
+		padding: 0.5rem 0.75rem;
+		font-size: 0.72rem;
+		font-weight: 600;
+		background: var(--color-bg);
+		color: var(--color-text-dim);
+		border: none;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.mission-tab:not(:last-child) {
+		border-right: 1px solid var(--color-border);
+	}
+	.mission-tab:hover:not(.active) {
+		background: rgba(99, 102, 241, 0.04);
+		color: var(--color-text);
+	}
+	.mission-tab.active {
+		background: rgba(99, 102, 241, 0.12);
+		color: #a5b4fc;
+		font-weight: 700;
+	}
+	.tab-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.2rem;
+		height: 1.2rem;
+		padding: 0 0.3rem;
+		border-radius: 999px;
+		font-size: 0.58rem;
+		font-weight: 700;
+		font-family: 'JetBrains Mono', monospace;
+		background: rgba(99, 102, 241, 0.25);
+		color: #c7d2fe;
+	}
+
+	/* ── Fairing Visualization ────────────────────── */
+	.fairing-viz {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+	.fairing-svg-wrap {
+		display: flex;
+		gap: 1rem;
+		align-items: flex-start;
+	}
+	.fairing-svg {
+		width: 100%;
+		max-width: 180px;
+		height: auto;
+		max-height: 320px;
+	}
+	.fairing-legend {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		flex: 1;
+		min-width: 0;
+	}
+	.fairing-dims {
+		display: flex;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+	}
+	.dim-item {
+		font-size: 0.6rem;
+		font-family: 'JetBrains Mono', monospace;
+		font-weight: 600;
+		color: var(--color-text-dim);
+		padding: 0.15rem 0.4rem;
+		border-radius: 0.25rem;
+		background: rgba(99, 102, 241, 0.06);
+		border: 1px solid rgba(99, 102, 241, 0.15);
+	}
+	.legend-item {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.62rem;
+	}
+	.legend-swatch {
+		width: 0.6rem;
+		height: 0.6rem;
+		border-radius: 0.15rem;
+		flex-shrink: 0;
+	}
+	.legend-name {
+		font-weight: 600;
+		color: var(--color-text);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.legend-dim {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.55rem;
+		color: var(--color-text-dim);
+		white-space: nowrap;
+		margin-left: auto;
+	}
+
+	/* ── Scheduled / Completed Tab Content ─────── */
+	.tab-content {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.tab-content-title {
+		font-size: 0.8rem;
+		font-weight: 700;
+		color: var(--color-text);
+	}
+	.empty-state {
+		font-size: 0.7rem;
+		color: var(--color-text-dim);
+		text-align: center;
+		padding: 2rem 1rem;
+		border: 1px dashed var(--color-border);
+		border-radius: 0.5rem;
+		background: rgba(99, 102, 241, 0.02);
+	}
+
+	/* ── Mission Table ────────────────────────────── */
+	.mission-table {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		border: 1px solid var(--color-border);
+		border-radius: 0.5rem;
+		overflow: hidden;
+	}
+	.table-header {
+		display: grid;
+		grid-template-columns: 2fr 1.2fr 1.5fr 0.8fr 0.8fr 0.8fr 0.9fr 0.6fr;
+		gap: 0.3rem;
+		padding: 0.4rem 0.6rem;
+		background: rgba(99, 102, 241, 0.06);
+		border-bottom: 1px solid var(--color-border);
+	}
+	.th {
+		font-size: 0.55rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--color-text-dim);
+	}
+	.table-row {
+		display: grid;
+		grid-template-columns: 2fr 1.2fr 1.5fr 0.8fr 0.8fr 0.8fr 0.9fr 0.6fr;
+		gap: 0.3rem;
+		padding: 0.4rem 0.6rem;
+		align-items: center;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+		transition: background 0.1s;
+	}
+	.table-row:last-child { border-bottom: none; }
+	.table-row:hover { background: rgba(99, 102, 241, 0.04); }
+	.table-row.status-pending { background: rgba(245, 158, 11, 0.03); }
+	.table-row.status-transit { background: rgba(59, 130, 246, 0.04); }
+	.table-row.status-complete { background: rgba(74, 222, 128, 0.03); }
+	.td {
+		font-size: 0.65rem;
+		color: var(--color-text);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.td-name { font-weight: 600; }
+	.td-vehicle { color: var(--color-text-dim); }
+	.td-dv, .td-cost {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.6rem;
+		font-weight: 600;
+	}
+	.td-dv { color: #f59e0b; }
+	.td-cost { color: #fbbf24; }
+	.td-date {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.58rem;
+	}
+	.td-actions {
+		display: flex;
+		gap: 0.2rem;
+		justify-content: flex-end;
+	}
+
+	/* Status badges */
+	.status-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.12rem 0.4rem;
+		border-radius: 999px;
+		font-size: 0.55rem;
+		font-weight: 700;
+	}
+	.status-badge.pending {
+		background: rgba(245, 158, 11, 0.12);
+		color: #f59e0b;
+		border: 1px solid rgba(245, 158, 11, 0.25);
+	}
+	.status-badge.transit {
+		background: rgba(59, 130, 246, 0.12);
+		color: #60a5fa;
+		border: 1px solid rgba(59, 130, 246, 0.25);
+	}
+	.status-badge.complete {
+		background: rgba(74, 222, 128, 0.12);
+		color: #4ade80;
+		border: 1px solid rgba(74, 222, 128, 0.25);
+	}
+	.status-badge.failed {
+		background: rgba(239, 68, 68, 0.12);
+		color: #f87171;
+		border: 1px solid rgba(239, 68, 68, 0.25);
+	}
 </style>

@@ -28,6 +28,7 @@
 	let formMass = $state(1000);
 	let formVolumeDims = $state('2m × 1m × 1m');
 	let formVolumeM3 = $state(2);
+	let formDiameter = $state(1.0);
 	let formCost = $state(50);
 	let formDeltaV = $state(0);
 	let formCommRange = $state('600 km (LEO)');
@@ -47,6 +48,7 @@
 		formMass = 1000;
 		formVolumeDims = '2m × 1m × 1m';
 		formVolumeM3 = 2;
+		formDiameter = 1.0;
 		formCost = 50;
 		formDeltaV = 0;
 		formCommRange = '600 km (LEO)';
@@ -66,6 +68,7 @@
 			mass: formMass,
 			volume: formVolumeDims,
 			volume_m3: formVolumeM3,
+			diameter_m: formDiameter,
 			cost: formCost,
 			deltaV: formDeltaV,
 			commRange: formCommRange,
@@ -151,6 +154,11 @@
 				<div class="form-field">
 					<label for="vol-m3">Volume (m³)</label>
 					<input id="vol-m3" type="number" bind:value={formVolumeM3} min="0" step="0.1" />
+				</div>
+
+				<div class="form-field">
+					<label for="dia">Diameter (m)</label>
+					<input id="dia" type="number" bind:value={formDiameter} min="0.1" step="0.1" />
 				</div>
 
 				<div class="form-field">

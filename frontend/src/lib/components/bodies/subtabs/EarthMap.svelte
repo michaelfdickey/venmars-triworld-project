@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { claimedComplexes, launchComplexProfiles, type LaunchComplexProfile } from '$lib/stores/gameStore';
+	import { claimedComplexes, launchComplexProfiles, scheduledMissionsStore, type LaunchComplexProfile, type ScheduledMissionMapData } from '$lib/stores/gameStore';
 	import type L from 'leaflet';
 
 	type PadRefurb = 'manual' | 'semi-auto' | 'automated';
@@ -123,6 +123,12 @@
 	let map: L.Map;
 	let leaflet: typeof L;
 	let markers: L.Marker[] = [];
+	let orbitLayers: L.Polyline[] = [];
+	let mapReady = $state(false);
+
+	// Visibility checkboxes
+	let showPlannedMissions = $state(true);
+	let showLaunchSites = $state(true);
 
 	// Detail modal state
 	let detailSite = $state<LaunchComplex | null>(null);
@@ -230,6 +236,84 @@
 		}
 	}
 
+	// ── Ground-track computation ──────────────────────────
+	// Compute the sinusoidal ground track for an inclined orbit.
+	// Returns an array of polyline segments (split at ±180° wrap).
+	function groundTrack(
+		inclinationDeg: number,
+		ascendingNodeLng: number,
+		points: number = 360,
+	): [number, number][][] {
+		const inc = inclinationDeg * Math.PI / 180;
+		const segments: [number, number][][] = [];
+		let current: [number, number][] = [];
+
+		for (let k = 0; k <= points; k++) {
+			const u = (k / points) * 2 * Math.PI; // argument of latitude (0..2π)
+			const lat = Math.asin(Math.sin(inc) * Math.sin(u)) * 180 / Math.PI;
+			let lng = ascendingNodeLng + Math.atan2(Math.cos(inc) * Math.sin(u), Math.cos(u)) * 180 / Math.PI;
+			// Wrap longitude to -180..180
+			lng = ((lng + 540) % 360) - 180;
+
+			if (current.length > 0) {
+				const prevLng = current[current.length - 1][1];
+				if (Math.abs(lng - prevLng) > 180) {
+					// Date-line crossing: end this segment, start new one
+					segments.push(current);
+					current = [];
+				}
+			}
+			current.push([lat, lng]);
+		}
+		if (current.length > 1) segments.push(current);
+		return segments;
+	}
+
+	function drawOrbits(missions: ScheduledMissionMapData[]) {
+		if (!map || !leaflet) return;
+		// Clear existing orbit lines
+		for (const layer of orbitLayers) layer.remove();
+		orbitLayers = [];
+		if (!showPlannedMissions) return;
+
+		for (const m of missions) {
+			// Find launch site longitude for ascending node
+			const site = complexes.find(c => c.name === m.site);
+			const ascNode = site ? site.lng : 0;
+			const segments = groundTrack(m.inclination, ascNode);
+			for (const seg of segments) {
+				const line = leaflet.polyline(seg, {
+					color: '#eab308',
+					weight: 1.5,
+					dashArray: '6 4',
+					opacity: 0.7,
+				}).addTo(map);
+				line.bindTooltip(m.name, { sticky: true, className: 'orbit-tooltip' });
+				orbitLayers.push(line);
+			}
+		}
+	}
+
+	function toggleMarkers(show: boolean) {
+		if (!map) return;
+		for (const m of markers) {
+			if (show) m.addTo(map);
+			else m.remove();
+		}
+	}
+
+	// Reactive: redraw orbits when store changes or visibility toggles
+	$effect(() => {
+		if (!mapReady) return;
+		const missions = $scheduledMissionsStore;
+		drawOrbits(showPlannedMissions ? missions : []);
+	});
+
+	$effect(() => {
+		if (!mapReady) return;
+		toggleMarkers(showLaunchSites);
+	});
+
 	onMount(async () => {
 		leaflet = await import('leaflet');
 		await import('leaflet/dist/leaflet.css');
@@ -293,6 +377,8 @@
 			});
 		});
 
+		mapReady = true;
+
 		return () => {
 			map.remove();
 		};
@@ -308,6 +394,19 @@
 	</div>
 
 	<div class="map-container" bind:this={mapContainer}></div>
+
+	<!-- Visibility controls -->
+	<div class="map-controls mt-2">
+		<label class="map-toggle">
+			<input type="checkbox" bind:checked={showLaunchSites} />
+			<span>Launch Sites</span>
+		</label>
+		<label class="map-toggle">
+			<input type="checkbox" bind:checked={showPlannedMissions} />
+			<span class="planned-dot"></span>
+			<span>Planned Missions</span>
+		</label>
+	</div>
 
 	<!-- Legend -->
 	<div class="flex gap-4 mt-3 text-xs text-[var(--color-text-dim)]">
@@ -990,5 +1089,33 @@
 		font-size: 0.7rem;
 		font-weight: 600;
 		color: #60a5fa;
+	}
+
+	/* ── Map controls ─────────────────────────── */
+	.map-controls {
+		display: flex; gap: 1rem; align-items: center;
+	}
+	.map-toggle {
+		display: flex; align-items: center; gap: 0.35rem;
+		font-size: 0.7rem; color: var(--color-text-dim);
+		cursor: pointer;
+	}
+	.map-toggle input[type="checkbox"] {
+		accent-color: #6366f1;
+		width: 0.85rem; height: 0.85rem;
+		cursor: pointer;
+	}
+	.planned-dot {
+		width: 10px; height: 2px;
+		background: #eab308;
+		border-top: 1px dashed #eab308;
+	}
+
+	:global(.orbit-tooltip) {
+		background: rgba(0,0,0,0.75) !important;
+		color: #eab308 !important;
+		border: 1px solid rgba(234, 179, 8, 0.3) !important;
+		font-size: 0.65rem !important;
+		padding: 2px 6px !important;
 	}
 </style>

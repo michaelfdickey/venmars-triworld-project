@@ -5,7 +5,7 @@
 
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, reservedRockets, payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, reuseModeLabels, type DeployMethod, type ReuseMode, type PayloadByOrbit } from '$lib/stores/gameStore';
+	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, reservedRockets, payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, reuseModeLabels, scheduledMissionsStore, type DeployMethod, type ReuseMode, type PayloadByOrbit } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -23,6 +23,8 @@
 		fairingDiameter_m: number;
 		costPerLaunch: number;
 		maxDeltaV_ms: number;
+		dryMass_kg: number;
+		propellantMass_kg: number;
 		payloadByMode: Record<ReuseMode, PayloadByOrbit | null>;
 	}
 
@@ -49,6 +51,7 @@
 		altRange: [number, number];
 		incRange: [number, number];
 		circular: boolean;       // if true, ap = pe = alt
+		fixedAlt?: number;       // if set, clicking this orbit locks altitude to this value
 	}
 
 	interface Destination {
@@ -164,6 +167,8 @@
 		fairingDiameter_m: rd.fairingDiameter_m,
 		costPerLaunch: rd.costPerLaunch,
 		maxDeltaV_ms: rd.maxDeltaV_ms,
+		dryMass_kg: rd.dryMass_kg,
+		propellantMass_kg: rd.propellantMass_kg,
 		payloadByMode: rd.payloadByMode,
 	}));
 
@@ -211,12 +216,13 @@
 		{
 			body: 'earth', bodyLabel: 'Earth', icon: '🌍', enabled: true,
 			orbits: [
-				{ id: 'earth-leo', name: 'Low Earth Orbit (LEO)', description: '200–2,000 km', defaultAlt: 400, defaultInc: 28.5, altRange: [200, 2000], incRange: [0, 180], circular: true },
-				{ id: 'earth-meo', name: 'Medium Earth Orbit (MEO)', description: '2,000–35,786 km', defaultAlt: 20200, defaultInc: 55, altRange: [2000, 35786], incRange: [0, 180], circular: true },
-				{ id: 'earth-geo', name: 'Geostationary (GEO)', description: '35,786 km equatorial', defaultAlt: 35786, defaultInc: 0, altRange: [35786, 35786], incRange: [0, 0], circular: true },
-				{ id: 'earth-gto', name: 'GTO (Transfer)', description: '200 × 35,786 km', defaultAlt: 35786, defaultInc: 28.5, altRange: [200, 35786], incRange: [0, 90], circular: false },
-				{ id: 'earth-sso', name: 'Sun-Synchronous (SSO)', description: '600–800 km polar', defaultAlt: 700, defaultInc: 98, altRange: [400, 1000], incRange: [96, 100], circular: true },
-				{ id: 'earth-heo', name: 'Highly Elliptical (HEO)', description: 'Molniya-type', defaultAlt: 39750, defaultInc: 63.4, altRange: [500, 40000], incRange: [0, 180], circular: false },
+				{ id: 'earth-custom', name: 'Custom', description: 'Set your own parameters', defaultAlt: 400, defaultInc: 28.5, altRange: [100, 500000], incRange: [0, 180], circular: true },
+				{ id: 'earth-leo', name: 'LEO', description: '200 km circular', defaultAlt: 200, defaultInc: 0, altRange: [100, 2000], incRange: [0, 180], circular: true, fixedAlt: 200 },
+				{ id: 'earth-meo', name: 'MEO', description: '2,000 km circular', defaultAlt: 2000, defaultInc: 0, altRange: [2000, 35786], incRange: [0, 180], circular: true, fixedAlt: 2000 },
+				{ id: 'earth-geo', name: 'GEO', description: '35,786 km equatorial', defaultAlt: 35786, defaultInc: 0, altRange: [35786, 35786], incRange: [0, 0], circular: true, fixedAlt: 35786 },
+				{ id: 'earth-gto', name: 'GTO', description: '200 × 35,786 km', defaultAlt: 35786, defaultInc: 28.5, altRange: [200, 35786], incRange: [0, 90], circular: false },
+				{ id: 'earth-sso', name: 'SSO', description: '700 km sun-sync', defaultAlt: 700, defaultInc: 98, altRange: [400, 1000], incRange: [96, 100], circular: true, fixedAlt: 700 },
+				{ id: 'earth-heo', name: 'HEO', description: 'Molniya-type', defaultAlt: 39750, defaultInc: 63.4, altRange: [500, 40000], incRange: [0, 180], circular: false },
 			],
 		},
 		{
@@ -288,25 +294,30 @@
 	const EARTH_MU = 3.986e14;  // m³/s²  standard gravitational parameter
 	const EARTH_R = 6371;       // km      mean radius
 
+	// Tsiolkovsky deltaV with payload: ve derived from zero-payload maxDeltaV
+	function rocketDeltaV(rocket: RocketOption, payloadMass: number): number {
+		const { dryMass_kg: D, propellantMass_kg: P, maxDeltaV_ms } = rocket;
+		if (D <= 0 || P <= 0) return maxDeltaV_ms;
+		const ve = maxDeltaV_ms / Math.log((D + P) / D);
+		return ve * Math.log((D + P + payloadMass) / (D + payloadMass));
+	}
+
 	// Orbital velocity at altitude (circular) in m/s
 	function orbitalVelocity(altKm: number, bodyR: number = EARTH_R, mu: number = EARTH_MU): number {
 		const r = (bodyR + altKm) * 1000; // meters
 		return Math.sqrt(mu / r);
 	}
 
-	// ΔV for circularization from an elliptical insertion
-	// Assumes launcher puts you in a parking orbit at periapsis, need to raise apoapsis
-	function dvCircularize(peKm: number, apKm: number): number {
-		if (Math.abs(peKm - apKm) < 1) return 0; // already circular
-		const rPe = (EARTH_R + peKm) * 1000;
-		const rAp = (EARTH_R + apKm) * 1000;
+	// ΔV for circularization: single burn at apoapsis of a transfer orbit
+	// Launch inserts at fromPeKm, transfer orbit apoapsis = toAltKm
+	function dvCircularize(fromPeKm: number, toAltKm: number): number {
+		if (Math.abs(fromPeKm - toAltKm) < 1) return 0;
+		const rPe = (EARTH_R + fromPeKm) * 1000;
+		const rAp = (EARTH_R + toAltKm) * 1000;
 		const a = (rPe + rAp) / 2;
-		// Hohmann transfer: burn at periapsis + burn at apoapsis
-		const vCircPe = Math.sqrt(EARTH_MU / rPe);
-		const vTransPe = Math.sqrt(EARTH_MU * (2 / rPe - 1 / a));
-		const vTransAp = Math.sqrt(EARTH_MU * (2 / rAp - 1 / a));
-		const vCircAp = Math.sqrt(EARTH_MU / rAp);
-		return Math.abs(vTransPe - vCircPe) + Math.abs(vCircAp - vTransAp);
+		const vTransferAp = Math.sqrt(EARTH_MU * (2 / rAp - 1 / a));
+		const vCirc = Math.sqrt(EARTH_MU / rAp);
+		return Math.abs(vCirc - vTransferAp);
 	}
 
 	// ΔV for a plane change at given altitude and angle
@@ -336,27 +347,41 @@
 		return 15; // default
 	}
 
-	// ΔV for launch from ground to a target orbit altitude
-	// Includes ~1,500 m/s gravity + drag losses for Earth ascent
+	// ΔV for launch from ground into a transfer orbit aimed at targetAltKm
+	// Rocket inserts at ~200 km parking periapsis with apoapsis at target
+	const PARKING_ALT_KM = 200;
+	const GRAVITY_DRAG_LOSS = 1500; // m/s typical Earth ascent losses
 	function dvLaunchToOrbit(targetAltKm: number): number {
-		const GRAVITY_DRAG_LOSS = 1500; // m/s typical Earth ascent losses
-		const vOrbit = orbitalVelocity(targetAltKm);
-		return vOrbit + GRAVITY_DRAG_LOSS;
+		if (targetAltKm <= PARKING_ALT_KM) {
+			return orbitalVelocity(targetAltKm) + GRAVITY_DRAG_LOSS;
+		}
+		const rPark = (EARTH_R + PARKING_ALT_KM) * 1000;
+		const rTarget = (EARTH_R + targetAltKm) * 1000;
+		const a = (rPark + rTarget) / 2;
+		return Math.sqrt(EARTH_MU * (2 / rPark - 1 / a)) + GRAVITY_DRAG_LOSS;
 	}
 
 	// Compute ΔV for each activity based on current mission parameters
 	function activityDeltaV(act: MissionActivity): number {
 		switch (act.type) {
 			case 'launch-to-orbit': {
-				const alt = selectedOrbit?.circular ? orbitAltitude : orbitPeriapsis;
-				return dvLaunchToOrbit(alt);
+				if (selectedOrbit?.circular) {
+					// Transfer orbit from parking to target altitude
+					return dvLaunchToOrbit(orbitAltitude);
+				} else {
+					// Direct insertion into target elliptical orbit
+					const rPe = (EARTH_R + orbitPeriapsis) * 1000;
+					const rAp = (EARTH_R + orbitApoapsis) * 1000;
+					const a = (rPe + rAp) / 2;
+					return Math.sqrt(EARTH_MU * (2 / rPe - 1 / a)) + GRAVITY_DRAG_LOSS;
+				}
 			}
 			case 'circularize':
 				if (selectedOrbit?.circular) {
-					// Launcher inserts at ~200km parking, circularize up to target
-					return dvCircularize(200, orbitAltitude);
+					// Single burn at apoapsis to circularize from transfer orbit
+					return dvCircularize(PARKING_ALT_KM, orbitAltitude);
 				} else {
-					return dvCircularize(orbitPeriapsis, orbitApoapsis);
+					return 0; // already in target orbit after launch insertion
 				}
 			case 'deploy-payload': {
 				const dm = deployMethods.find(d => d.id === selectedDeployMethod);
@@ -420,10 +445,10 @@
 	// Destination
 	let selectedBody = $state('earth');
 	let selectedOrbitId = $state('earth-leo');
-	let orbitAltitude = $state(400);
-	let orbitInclination = $state(28.5);
-	let orbitApoapsis = $state(400);
-	let orbitPeriapsis = $state(400);
+	let orbitAltitude = $state(200);
+	let orbitInclination = $state(0);
+	let orbitApoapsis = $state(200);
+	let orbitPeriapsis = $state(200);
 
 	// Sub-tab navigation
 	let missionSubTab = $state<'designer' | 'scheduled' | 'completed'>('designer');
@@ -585,10 +610,10 @@
 		selectedFuel = '';
 		selectedBody = 'earth';
 		selectedOrbitId = 'earth-leo';
-		orbitAltitude = 400;
-		orbitInclination = 28.5;
-		orbitApoapsis = 400;
-		orbitPeriapsis = 400;
+		orbitAltitude = 200;
+		orbitInclination = 0;
+		orbitApoapsis = 200;
+		orbitPeriapsis = 200;
 		missionMode = 'one-off';
 		launchDate = '2031-01-15';
 		repeatIntervalDays = 30;
@@ -730,18 +755,22 @@
 	function selectBody(body: string) {
 		selectedBody = body;
 		const dest = destinations.find(d => d.body === body);
-		if (dest && dest.orbits.length > 0) {
+		if (dest && dest.orbits.length > 1) {
+			// Default to the first preset (skip Custom at index 0)
+			selectOrbit(dest.orbits[1]);
+		} else if (dest && dest.orbits.length > 0) {
 			selectOrbit(dest.orbits[0]);
 		}
 	}
 
 	function selectOrbit(orbit: OrbitType) {
 		selectedOrbitId = orbit.id;
-		orbitAltitude = orbit.defaultAlt;
+		const alt = orbit.fixedAlt ?? orbit.defaultAlt;
+		orbitAltitude = alt;
 		orbitInclination = orbit.defaultInc;
 		if (orbit.circular) {
-			orbitApoapsis = orbit.defaultAlt;
-			orbitPeriapsis = orbit.defaultAlt;
+			orbitApoapsis = alt;
+			orbitPeriapsis = alt;
 		} else {
 			orbitPeriapsis = orbit.altRange[0];
 			orbitApoapsis = orbit.defaultAlt;
@@ -756,6 +785,13 @@
 	function clampInc(v: number): number {
 		if (!selectedOrbit) return v;
 		return Math.max(selectedOrbit.incRange[0], Math.min(selectedOrbit.incRange[1], v));
+	}
+
+	// Switch to "Custom" orbit if the user manually edits a fixed-preset orbit
+	function switchToCustomIfFixed() {
+		if (!selectedOrbit?.fixedAlt) return;
+		const customOrbit = availableOrbits.find(o => o.id.endsWith('-custom'));
+		if (customOrbit) selectedOrbitId = customOrbit.id;
 	}
 
 	// ── Derived: activities ───────────────────────────────
@@ -802,6 +838,19 @@
 		}
 	});
 
+	// Sync scheduled missions to the shared store for map visualization
+	$effect(() => {
+		scheduledMissionsStore.set(scheduledMissions.map(m => ({
+			name: m.name,
+			site: m.site,
+			inclination: m.inclination,
+			altitude: m.altitude,
+			apoapsis: m.apoapsis,
+			periapsis: m.periapsis,
+			circular: Math.abs(m.apoapsis - m.periapsis) < 1,
+		})));
+	});
+
 	let chosenFuel = $derived(fuelOptions.find(f => f.name === selectedFuel));
 	let chosenPayloadItems = $derived(selectedPayloads.map(n => payloadOptions.find(p => p.name === n)).filter(Boolean) as PayloadOption[]);
 
@@ -838,14 +887,17 @@
 	let grandTotalVolume = $derived(totalPayloadVolume + fuelVolume_m3());
 	let totalMissionCost = $derived(totalPayloadCost + fuelCost() + (chosenRocket?.costPerLaunch ?? 0));
 
+	// Available deltaV accounting for payload mass via Tsiolkovsky
+	let availableDeltaV = $derived(chosenRocket ? rocketDeltaV(chosenRocket, totalPayloadMass) : 0);
+
 	let overMass = $derived(chosenRocket ? totalPayloadMass > effectivePayloadLEO : false);
 	let overVolume = $derived(chosenRocket ? totalPayloadVolume > chosenRocket.fairingVolume_m3 : false);
-	let overDeltaV = $derived(chosenRocket ? totalDeltaV > chosenRocket.maxDeltaV_ms : false);
+	let overDeltaV = $derived(chosenRocket ? totalDeltaV > availableDeltaV : false);
 	let overAny = $derived(overMass || overVolume || overDeltaV);
 
 	let massPercent = $derived(chosenRocket ? (grandTotalMass / effectivePayloadLEO) * 100 : 0);
 	let volumePercent = $derived(chosenRocket ? (grandTotalVolume / chosenRocket.fairingVolume_m3) * 100 : 0);
-	let deltaVPercent = $derived(chosenRocket ? (totalDeltaV / chosenRocket.maxDeltaV_ms) * 100 : 0);
+	let deltaVPercent = $derived(availableDeltaV > 0 ? (totalDeltaV / availableDeltaV) * 100 : 0);
 
 	let launchesNeeded = $derived(
 		chosenRocket && totalPayloadMass > 0
@@ -1043,11 +1095,11 @@
 			</div>
 			{#if overDeltaV}
 				<div class="mass-warning mt-1">
-					⚠ Mission ΔV exceeds vehicle max by {((totalDeltaV - chosenRocket.maxDeltaV_ms) / 1000).toFixed(2)} km/s.
+					⚠ Mission ΔV exceeds available budget by {((totalDeltaV - availableDeltaV) / 1000).toFixed(2)} km/s.
 				</div>
 			{/if}
 			<div class="bar-label-row mt-1">
-				<span class="bar-title">ΔV — {(totalDeltaV / 1000).toFixed(2)} km/s / {(chosenRocket.maxDeltaV_ms / 1000).toFixed(1)} km/s</span>
+				<span class="bar-title">ΔV — {(totalDeltaV / 1000).toFixed(2)} / {(availableDeltaV / 1000).toFixed(2)} km/s {totalPayloadMass > 0 ? `(empty: ${(chosenRocket.maxDeltaV_ms / 1000).toFixed(1)})` : ''}</span>
 				<span class="bar-pct">{deltaVPercent.toFixed(0)}%</span>
 			</div>
 			<div class="mass-bar-container">
@@ -1196,6 +1248,7 @@
 									min={selectedOrbit.altRange[0]}
 									max={selectedOrbit.altRange[1]}
 									bind:value={orbitAltitude}
+									oninput={() => switchToCustomIfFixed()}
 									onblur={() => { orbitAltitude = clampAlt(orbitAltitude); orbitApoapsis = orbitAltitude; orbitPeriapsis = orbitAltitude; }}
 								/>
 								<span class="param-unit">km</span>
@@ -1226,6 +1279,7 @@
 									min={selectedOrbit.altRange[0]}
 									max={orbitApoapsis}
 									bind:value={orbitPeriapsis}
+									oninput={() => switchToCustomIfFixed()}
 									onblur={() => { orbitPeriapsis = Math.max(selectedOrbit!.altRange[0], Math.min(orbitApoapsis, orbitPeriapsis)); }}
 								/>
 								<span class="param-unit">km</span>
@@ -1242,6 +1296,7 @@
 								max={selectedOrbit.incRange[1]}
 								step="0.1"
 								bind:value={orbitInclination}
+								oninput={() => switchToCustomIfFixed()}
 								onblur={() => { orbitInclination = clampInc(orbitInclination); }}
 							/>
 							<span class="param-unit">°</span>
@@ -1331,13 +1386,11 @@
 			{#each missionActivities as act, i}
 				{@const def = activityDefs.find(d => d.id === act.type)}
 				{@const dv = activityDeltaV(act)}
+				{@const runningDv = missionActivities.slice(0, i + 1).reduce((s, a) => s + activityDeltaV(a), 0)}
 				<div class="activity-item">
 					<span class="activity-num">{i + 1}</span>
 					<span class="activity-icon">{def?.icon ?? '?'}</span>
 					<span class="activity-name">{def?.name ?? act.type}</span>
-					<span class="activity-dv" class:dv-zero={dv === 0}>
-						{dv > 0 ? `${dv.toFixed(0)} m/s` : '—'}
-					</span>
 					{#if act.type === 'change-orbit'}
 						<div class="activity-param">
 							<span class="activity-param-label">Target alt:</span>
@@ -1380,6 +1433,14 @@
 					{:else}
 						<span class="activity-desc">{def?.description ?? ''}</span>
 					{/if}
+					<div class="activity-dv-group">
+						<span class="activity-dv" class:dv-zero={dv === 0}>
+							{dv > 0 ? `${dv.toFixed(0)}` : '—'}
+						</span>
+						<span class="activity-running" class:dv-over={chosenRocket && runningDv > availableDeltaV}>
+							Σ {runningDv.toFixed(0)}
+						</span>
+					</div>
 					<div class="activity-actions">
 						<button class="act-btn" disabled={i === 0} onclick={() => moveActivity(i, -1)} title="Move up">▲</button>
 						<button class="act-btn" disabled={i === missionActivities.length - 1} onclick={() => moveActivity(i, 1)} title="Move down">▼</button>
@@ -2151,6 +2212,18 @@
 		flex-shrink: 0;
 	}
 	.activity-dv.dv-zero { color: var(--color-text-dim); background: transparent; border-color: transparent; }
+
+	/* ΔV group: step cost + running total */
+	.activity-dv-group {
+		display: flex; flex-direction: column; align-items: flex-end; gap: 0.1rem;
+		flex-shrink: 0; margin-left: auto;
+	}
+	.activity-running {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.5rem; font-weight: 600;
+		color: var(--color-text-dim);
+	}
+	.activity-running.dv-over { color: #ef4444; }
 
 	/* ΔV total row */
 	.dv-total-row {

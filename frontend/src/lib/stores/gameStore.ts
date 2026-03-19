@@ -643,6 +643,8 @@ export interface RocketDef {
 	propellant: string;
 	thrust: number;              // kN total at liftoff
 	maxDeltaV_ms: number;        // m/s max ΔV with zero payload (structural limit)
+	dryMass_kg: number;          // effective structural mass (all stages) for Tsiolkovsky model
+	propellantMass_kg: number;   // effective total propellant mass for Tsiolkovsky model
 	maxGs: number;               // max structural G-load (acceleration limit)
 	maxQ_kPa: number;            // max dynamic pressure during ascent (kPa)
 	color: string;
@@ -674,7 +676,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 1000, fairingDiameter_m: 8.0, costPerLaunch: 10, purchaseCostM: 250, reusable: true,
 		stages: 2, height: 121, diameter: 9, propellant: 'LCH₄ / LOX', thrust: 74500,
-		maxDeltaV_ms: 11800, maxGs: 3.5, maxQ_kPa: 35,
+		maxDeltaV_ms: 11800, dryMass_kg: 230500, propellantMass_kg: 5882200, maxGs: 3.5, maxQ_kPa: 35,
 		color: '#3b82f6', shape: 'wide-dual', homeBase: 'starbase', globalInventory: 8,
 		maintenanceCostM: 15, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.0005 }, { material: 'Inconel / Superalloys', amountMt: 0.00008 },
@@ -692,7 +694,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 145, fairingDiameter_m: 5.2, costPerLaunch: 97, purchaseCostM: 180, reusable: true,
 		stages: 2, height: 70, diameter: 3.66, propellant: 'RP-1 / LOX', thrust: 22819,
-		maxDeltaV_ms: 12500, maxGs: 5.0, maxQ_kPa: 40,
+		maxDeltaV_ms: 12500, dryMass_kg: 36600, propellantMass_kg: 1581600, maxGs: 5.0, maxQ_kPa: 40,
 		color: '#60a5fa', shape: 'triple', homeBase: 'ksc-39a', globalInventory: 5,
 		maintenanceCostM: 12, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.0003 }, { material: 'Aluminum', amountMt: 0.00015 },
@@ -710,7 +712,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 145, fairingDiameter_m: 5.2, costPerLaunch: 67, purchaseCostM: 120, reusable: true,
 		stages: 2, height: 70, diameter: 3.66, propellant: 'RP-1 / LOX', thrust: 7607,
-		maxDeltaV_ms: 11200, maxGs: 6.0, maxQ_kPa: 40,
+		maxDeltaV_ms: 11200, dryMass_kg: 27500, propellantMass_kg: 792700, maxGs: 6.0, maxQ_kPa: 40,
 		color: '#93c5fd', shape: 'single', homeBase: 'ccafs-40', globalInventory: 18,
 		maintenanceCostM: 8, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.0002 }, { material: 'Aluminum', amountMt: 0.0001 },
@@ -728,7 +730,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 830, fairingDiameter_m: 8.4, costPerLaunch: 2200, purchaseCostM: 2500, reusable: false,
 		stages: 2, height: 111, diameter: 8.4, propellant: 'LH₂ / LOX + SRBs', thrust: 39144,
-		maxDeltaV_ms: 13200, maxGs: 3.0, maxQ_kPa: 33,
+		maxDeltaV_ms: 13200, dryMass_kg: 75600, propellantMass_kg: 1677000, maxGs: 3.0, maxQ_kPa: 33,
 		color: '#f97316', shape: 'srb', homeBase: 'ksc-39a', globalInventory: 3,
 		maintenanceCostM: 85, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.001 }, { material: 'Concrete / Cement', amountMt: 0.002 },
@@ -746,7 +748,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 400, fairingDiameter_m: 7.0, costPerLaunch: 68, purchaseCostM: 200, reusable: true,
 		stages: 2, height: 98, diameter: 7, propellant: 'LCH₄ / LOX (S1) + LH₂ / LOX (S2)', thrust: 17100,
-		maxDeltaV_ms: 12000, maxGs: 4.0, maxQ_kPa: 38,
+		maxDeltaV_ms: 12000, dryMass_kg: 38500, propellantMass_kg: 947400, maxGs: 4.0, maxQ_kPa: 38,
 		color: '#06b6d4', shape: 'wide-dual', homeBase: 'ccafs-40', globalInventory: 4,
 		maintenanceCostM: 14, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.0004 }, { material: 'Aluminum', amountMt: 0.0002 },
@@ -764,7 +766,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 172, fairingDiameter_m: 5.4, costPerLaunch: 110, purchaseCostM: 160, reusable: false,
 		stages: 2, height: 62, diameter: 5.4, propellant: 'LCH₄ / LOX + SRBs', thrust: 11060,
-		maxDeltaV_ms: 11800, maxGs: 5.5, maxQ_kPa: 38,
+		maxDeltaV_ms: 11800, dryMass_kg: 27500, propellantMass_kg: 538900, maxGs: 5.5, maxQ_kPa: 38,
 		color: '#fbbf24', shape: 'srb', homeBase: 'ccafs-40', globalInventory: 6,
 		maintenanceCostM: 10, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.0002 }, { material: 'Aluminum', amountMt: 0.0001 },
@@ -782,7 +784,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 900, fairingDiameter_m: 9.5, costPerLaunch: 500, purchaseCostM: 800, reusable: false,
 		stages: 3, height: 114, diameter: 10.6, propellant: 'Kerolox (S1) + LH₂ / LOX (S2/S3)', thrust: 57840,
-		maxDeltaV_ms: 14000, maxGs: 4.5, maxQ_kPa: 36,
+		maxDeltaV_ms: 14000, dryMass_kg: 56000, propellantMass_kg: 2175400, maxGs: 4.5, maxQ_kPa: 36,
 		color: '#ef4444', shape: 'srb', homeBase: 'wenchang', globalInventory: 2,
 		maintenanceCostM: 45, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.0008 }, { material: 'Concrete / Cement', amountMt: 0.001 },
@@ -800,7 +802,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 180, fairingDiameter_m: 5.4, costPerLaunch: 115, purchaseCostM: 150, reusable: false,
 		stages: 2, height: 63, diameter: 5.4, propellant: 'LH₂ / LOX + SRBs', thrust: 8000,
-		maxDeltaV_ms: 11500, maxGs: 4.5, maxQ_kPa: 35,
+		maxDeltaV_ms: 11500, dryMass_kg: 26600, propellantMass_kg: 445500, maxGs: 4.5, maxQ_kPa: 35,
 		color: '#8b5cf6', shape: 'srb', homeBase: 'kourou', globalInventory: 5,
 		maintenanceCostM: 9, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.00015 }, { material: 'Aluminum', amountMt: 0.0001 },
@@ -818,7 +820,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 100, fairingDiameter_m: 4.5, costPerLaunch: 50, purchaseCostM: 80, reusable: true,
 		stages: 2, height: 43, diameter: 4.6, propellant: 'LCH₄ / LOX', thrust: 6900,
-		maxDeltaV_ms: 10800, maxGs: 6.0, maxQ_kPa: 42,
+		maxDeltaV_ms: 10800, dryMass_kg: 26100, propellantMass_kg: 544400, maxGs: 6.0, maxQ_kPa: 42,
 		color: '#10b981', shape: 'single', homeBase: 'vandenberg', globalInventory: 7,
 		maintenanceCostM: 5, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.0001 }, { material: 'Carbon Fiber', amountMt: 0.00005 },
@@ -836,7 +838,7 @@ export const rocketDefs: RocketDef[] = [
 		},
 		fairingVolume_m3: 160, fairingDiameter_m: 5.0, costPerLaunch: 55, purchaseCostM: 100, reusable: true,
 		stages: 2, height: 66, diameter: 5, propellant: 'LCH₄ / LOX', thrust: 11000,
-		maxDeltaV_ms: 11500, maxGs: 5.0, maxQ_kPa: 40,
+		maxDeltaV_ms: 11500, dryMass_kg: 35600, propellantMass_kg: 916000, maxGs: 5.0, maxQ_kPa: 40,
 		color: '#a78bfa', shape: 'single', homeBase: 'ccafs-40', globalInventory: 1,
 		maintenanceCostM: 6, maintenanceMaterials: [
 			{ material: 'Steel', amountMt: 0.00012 }, { material: 'Inconel / Superalloys', amountMt: 0.00004 },
@@ -848,6 +850,18 @@ export const rocketDefs: RocketDef[] = [
 
 // VenMars program rocket inventory: rocket id → count owned
 export const rocketInventory = writable<Record<string, number>>({});
+
+// ── Scheduled missions (shared for map visualization) ─────────────
+export interface ScheduledMissionMapData {
+	name: string;
+	site: string;        // launch site name
+	inclination: number; // degrees
+	altitude: number;    // km (circular) or average for elliptical
+	apoapsis: number;    // km
+	periapsis: number;   // km
+	circular: boolean;
+}
+export const scheduledMissionsStore = writable<ScheduledMissionMapData[]>([]);
 
 // ── Earth material stockpiles ─────────────────────────────────────
 // Index matches materialDefs.  Values in tonnes (except Electricity index 16 = MWh).

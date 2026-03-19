@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { customPayloads, payloadCategoryLabels, payloadCategoryIcons, type PayloadCategory, type PayloadDef } from '$lib/stores/gameStore';
+	import { customPayloads, payloadCategoryLabels, payloadCategoryIcons, type PayloadCategory, type PayloadDef, type DeployMethod } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -35,6 +35,8 @@
 	let formLifespan = $state(10);
 	let formDescription = $state('');
 	let formDestinations = $state('LEO');
+	let formMaxGs = $state(8);
+	let formDeployMethod = $state<DeployMethod>('spin-stabilized');
 
 	let showForm = $state(false);
 
@@ -55,6 +57,8 @@
 		formLifespan = 10;
 		formDescription = '';
 		formDestinations = 'LEO';
+		formMaxGs = 8;
+		formDeployMethod = 'spin-stabilized';
 	}
 
 	function submitDesign() {
@@ -73,6 +77,8 @@
 			deltaV: formDeltaV,
 			commRange: formCommRange,
 			lifespan: formLifespan,
+			maxGs: formMaxGs,
+			deployMethod: formDeployMethod,
 			description: formDescription.trim(),
 			destinations: formDestinations.split(',').map(d => d.trim()).filter(Boolean),
 		};
@@ -174,6 +180,23 @@
 				<div class="form-field">
 					<label for="life">Lifespan (years)</label>
 					<input id="life" type="number" bind:value={formLifespan} min="0" />
+				</div>
+
+				<div class="form-field">
+					<label for="maxgs">Max G-Load</label>
+					<input id="maxgs" type="number" bind:value={formMaxGs} min="0" step="0.5" />
+				</div>
+
+				<div class="form-field">
+					<label for="deploy">Deploy Method</label>
+					<select id="deploy" bind:value={formDeployMethod}>
+						<option value="spin-stabilized">Spin-Stabilized</option>
+						<option value="propulsive">Propulsive</option>
+						<option value="docking">Docking</option>
+						<option value="electromagnetic">Electromagnetic</option>
+						<option value="cold-gas">Cold-Gas</option>
+						<option value="gravity-release">Gravity Release</option>
+					</select>
 				</div>
 
 				<div class="form-field">

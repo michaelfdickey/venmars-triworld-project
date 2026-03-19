@@ -1,7 +1,16 @@
 <script lang="ts">
-	import { payloadInventory, marketSatellites, venMarsPayloads, customPayloads, payloadCategoryLabels, payloadCategoryIcons, type PayloadDef, type PayloadCategory } from '$lib/stores/gameStore';
+	import { payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, payloadCategoryLabels, payloadCategoryIcons, type PayloadDef, type PayloadCategory, type DeployMethod } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
+
+	const deployMethodLabels: Record<DeployMethod, string> = {
+		'spin-stabilized': 'Spin',
+		'propulsive': 'Propulsive',
+		'docking': 'Docking',
+		'electromagnetic': 'EM Rail',
+		'cold-gas': 'Cold-Gas',
+		'gravity-release': 'Gravity',
+	};
 
 	// Build a lookup of all payload defs by id
 	let allPayloads = $derived.by(() => {
@@ -16,6 +25,8 @@
 	interface InventoryItem {
 		payload: PayloadDef;
 		count: number;
+		reserved: number;
+		available: number;
 	}
 
 	let inventoryItems = $derived.by(() => {
@@ -23,7 +34,10 @@
 		for (const [id, count] of Object.entries($payloadInventory)) {
 			if (count <= 0) continue;
 			const payload = allPayloads.get(id);
-			if (payload) items.push({ payload, count });
+			if (payload) {
+				const reserved = $reservedPayloads[id] ?? 0;
+				items.push({ payload, count, reserved, available: count - reserved });
+			}
 		}
 		return items;
 	});
@@ -47,6 +61,7 @@
 	);
 
 	let totalItems = $derived(inventoryItems.reduce((sum, i) => sum + i.count, 0));
+	let totalReserved = $derived(inventoryItems.reduce((sum, i) => sum + i.reserved, 0));
 	let totalValue = $derived(inventoryItems.reduce((sum, i) => sum + i.payload.cost * i.count, 0));
 
 	function formatMass(kg: number): string {
@@ -64,6 +79,9 @@
 		{#if totalItems > 0}
 			<div class="summary-badges">
 				<span class="badge">{totalItems} unit{totalItems !== 1 ? 's' : ''}</span>
+				{#if totalReserved > 0}
+					<span class="badge reserved">{totalReserved} reserved</span>
+				{/if}
 				<span class="badge value">${totalValue.toFixed(1)}M total</span>
 			</div>
 		{/if}
@@ -85,15 +103,23 @@
 				</div>
 
 				<div class="inv-grid">
-					{#each group.items as { payload, count }}
-						<div class="inv-card">
+					{#each group.items as { payload, count, reserved, available }}
+						<div class="inv-card" class:has-reserved={reserved > 0}>
 							<div class="inv-top">
 								<span class="inv-icon">{payload.icon}</span>
 								<div class="inv-info">
 									<span class="inv-name">{payload.name}</span>
 									<span class="inv-cat">{payloadCategoryLabels[payload.category]}</span>
 								</div>
-								<span class="inv-qty">×{count}</span>
+								<div class="inv-qty-col">
+									<span class="inv-qty">×{count}</span>
+									{#if reserved > 0}
+										<div class="inv-alloc-row">
+											<span class="inv-avail">{available} avail</span>
+											<span class="inv-reserved">{reserved} sched</span>
+										</div>
+									{/if}
+								</div>
 							</div>
 
 							<div class="inv-stats">
@@ -117,13 +143,16 @@
 									<span class="stat-label">Life</span>
 									<span class="stat-value">{payload.lifespan > 0 ? payload.lifespan + ' yr' : '1-use'}</span>
 								</div>
-								<div class="stat">
-									<span class="stat-label">Vol</span>
+								<div class="stat">								<span class="stat-label">Max G</span>
+								<span class="stat-value">{payload.maxGs > 0 ? payload.maxGs + ' g' : '—'}</span>
+							</div>
+							<div class="stat">									<span class="stat-label">Vol</span>
 									<span class="stat-value">{payload.volume_m3} m³</span>
 								</div>
+							<div class="stat">
+								<span class="stat-label">Deploy</span>
+								<span class="stat-value">{deployMethodLabels[payload.deployMethod]}</span>
 							</div>
-
-							<div class="inv-destinations">
 								{#each payload.destinations as dest}
 									<span class="dest-tag">{dest}</span>
 								{/each}
@@ -160,6 +189,12 @@
 		background: rgba(59, 130, 246, 0.15);
 		color: #60a5fa;
 		border: 1px solid rgba(59, 130, 246, 0.25);
+	}
+
+	.badge.reserved {
+		background: rgba(245, 158, 11, 0.15);
+		color: #f59e0b;
+		border: 1px solid rgba(245, 158, 11, 0.25);
 	}
 
 	.empty-state {
@@ -234,6 +269,35 @@
 		font-weight: 700;
 		color: #60a5fa;
 		flex-shrink: 0;
+	}
+
+	.inv-qty-col {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 0.1rem;
+		flex-shrink: 0;
+	}
+
+	.inv-alloc-row {
+		display: flex;
+		gap: 0.3rem;
+	}
+
+	.inv-avail {
+		font-size: 0.5rem;
+		font-weight: 600;
+		color: #4ade80;
+	}
+
+	.inv-reserved {
+		font-size: 0.5rem;
+		font-weight: 600;
+		color: #f59e0b;
+	}
+
+	.inv-card.has-reserved {
+		border-color: rgba(245, 158, 11, 0.25);
 	}
 
 	.inv-stats {

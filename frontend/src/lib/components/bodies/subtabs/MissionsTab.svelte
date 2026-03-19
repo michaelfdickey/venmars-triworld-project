@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, payloadInventory, marketSatellites, venMarsPayloads, customPayloads } from '$lib/stores/gameStore';
+	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, reservedRockets, payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, type DeployMethod } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -16,6 +16,7 @@
 		fairingVolume_m3: number;
 		fairingDiameter_m: number;
 		costPerLaunch: number;
+		maxDeltaV_ms: number;
 	}
 
 	interface PayloadOption {
@@ -51,7 +52,7 @@
 		enabled: boolean;
 	}
 
-	type ActivityType = 'launch-to-orbit' | 'circularize' | 'deploy-payload' | 'rendezvous' | 'dock' | 'land' | 'deorbit' | 'plane-change' | 'hohmann-transfer' | 'aerobrake' | 'station-keep';
+	type ActivityType = 'launch-to-orbit' | 'circularize' | 'deploy-payload' | 'rendezvous' | 'dock' | 'land' | 'deorbit' | 'plane-change' | 'hohmann-transfer' | 'aerobrake' | 'station-keep' | 'change-orbit';
 
 	interface ActivityDef {
 		id: ActivityType;
@@ -64,9 +65,10 @@
 	interface MissionActivity {
 		type: ActivityType;
 		notes: string;
+		targetAlt?: number;  // km — used by change-orbit
 	}
 
-	type DeployMethod = 'spin-stabilized' | 'propulsive' | 'docking' | 'electromagnetic';
+	// DeployMethod type imported from gameStore
 
 	interface DeployMethodDef {
 		id: DeployMethod;
@@ -152,6 +154,7 @@
 		fairingVolume_m3: rd.fairingVolume_m3,
 		fairingDiameter_m: rd.fairingDiameter_m,
 		costPerLaunch: rd.costPerLaunch,
+		maxDeltaV_ms: rd.maxDeltaV_ms,
 	}));
 
 	let ownedRocketCounts = $derived.by(() => {
@@ -258,6 +261,7 @@
 		{ id: 'hohmann-transfer', name: 'Hohmann Transfer', icon: '🔄', description: 'Transfer to higher/lower orbit', enabled: false },
 		{ id: 'aerobrake', name: 'Aerobrake', icon: '🌡️', description: 'Use atmosphere to slow down', enabled: false },
 		{ id: 'station-keep', name: 'Station-Keep', icon: '📍', description: 'Maintain current orbit per year', enabled: true },
+		{ id: 'change-orbit', name: 'Change Orbit', icon: '⇅', description: 'Hohmann transfer to a new circular orbit altitude', enabled: true },
 	];
 
 	// ── Deploy Methods ────────────────────────────────────
@@ -266,6 +270,8 @@
 		{ id: 'propulsive', name: 'Propulsive', icon: '🚀', description: 'Payload uses own propulsion — needs ΔV reserves', deltaVOverhead: 50 },
 		{ id: 'docking', name: 'Docking', icon: '🔗', description: 'Payload docks with station/vehicle — precise guidance', deltaVOverhead: 15 },
 		{ id: 'electromagnetic', name: 'Electromagnetic', icon: '⚡', description: 'Rail-launched from carrier — high velocity, low mass payloads', deltaVOverhead: 2 },
+		{ id: 'cold-gas', name: 'Cold-Gas', icon: '💨', description: 'Simple cold-gas thruster push — low force, safe for small sats', deltaVOverhead: 3 },
+		{ id: 'gravity-release', name: 'Gravity Release', icon: '⬇️', description: 'Passive separation — no active deployment system needed', deltaVOverhead: 1 },
 	];
 
 	// ── ΔV Calculations ──────────────────────────────────
@@ -369,6 +375,20 @@
 				return 0;   // computed when target orbit is specified
 			case 'aerobrake':
 				return 0;   // no propulsive cost
+			case 'change-orbit': {
+				const fromAlt = selectedOrbit?.circular ? orbitAltitude : (orbitPeriapsis + orbitApoapsis) / 2;
+				const toAlt = act.targetAlt ?? fromAlt;
+				if (Math.abs(fromAlt - toAlt) < 1) return 0;
+				// Hohmann transfer ΔV: two burns
+				const r1 = (EARTH_R + fromAlt) * 1000;
+				const r2 = (EARTH_R + toAlt) * 1000;
+				const aT = (r1 + r2) / 2;
+				const v1 = Math.sqrt(EARTH_MU / r1);
+				const vT1 = Math.sqrt(EARTH_MU * (2 / r1 - 1 / aT));
+				const vT2 = Math.sqrt(EARTH_MU * (2 / r2 - 1 / aT));
+				const v2 = Math.sqrt(EARTH_MU / r2);
+				return Math.abs(vT1 - v1) + Math.abs(v2 - vT2);
+			}
 			default:
 				return 0;
 		}
@@ -510,6 +530,49 @@
 		loadedMissionIndex = null;
 	}
 
+	// ── Payload name → ID mapping ─────────────────────────
+	function payloadNameToId(name: string): string | undefined {
+		const allDefs = [...marketSatellites, ...venMarsPayloads];
+		return allDefs.find(d => d.name === name)?.id;
+	}
+
+	function rocketNameToId(name: string): string | undefined {
+		return rocketDefs.find(r => r.name === name)?.id;
+	}
+
+	// ── Reserve / Release helpers ─────────────────────────
+	function reservePayloadsForMission(payloadNames: string[]) {
+		reservedPayloads.update(rp => {
+			const updated = { ...rp };
+			for (const name of payloadNames) {
+				const id = payloadNameToId(name);
+				if (id) updated[id] = (updated[id] ?? 0) + 1;
+			}
+			return updated;
+		});
+	}
+
+	function releasePayloadsForMission(payloadNames: string[]) {
+		reservedPayloads.update(rp => {
+			const updated = { ...rp };
+			for (const name of payloadNames) {
+				const id = payloadNameToId(name);
+				if (id) updated[id] = Math.max(0, (updated[id] ?? 0) - 1);
+			}
+			return updated;
+		});
+	}
+
+	function reserveRocketForMission(rocketName: string) {
+		const id = rocketNameToId(rocketName);
+		if (id) reservedRockets.update(rr => ({ ...rr, [id]: (rr[id] ?? 0) + 1 }));
+	}
+
+	function releaseRocketForMission(rocketName: string) {
+		const id = rocketNameToId(rocketName);
+		if (id) reservedRockets.update(rr => ({ ...rr, [id]: Math.max(0, (rr[id] ?? 0) - 1) }));
+	}
+
 	// ── Schedule / Cancel / Load Scheduled ────────────────
 	function scheduleMission() {
 		const name = missionName || autoGenerateName();
@@ -537,17 +600,28 @@
 			totalCost: totalMissionCost,
 		};
 		scheduledMissions = [...scheduledMissions, scheduled];
+		// Reserve payloads and rocket
+		reservePayloadsForMission(scheduled.payloads);
+		if (scheduled.rocket) reserveRocketForMission(scheduled.rocket);
 		missionSubTab = 'scheduled';
 		newMission();
 	}
 
 	function cancelScheduledMission(index: number) {
+		const m = scheduledMissions[index];
+		if (m) {
+			releasePayloadsForMission(m.payloads);
+			if (m.rocket) releaseRocketForMission(m.rocket);
+		}
 		scheduledMissions = scheduledMissions.filter((_, i) => i !== index);
 	}
 
 	function loadScheduledToDesigner(index: number) {
 		const m = scheduledMissions[index];
 		if (!m) return;
+		// Release reserved inventory first
+		releasePayloadsForMission(m.payloads);
+		if (m.rocket) releaseRocketForMission(m.rocket);
 		missionName = m.name;
 		selectedSite = m.site;
 		selectedRocket = m.rocket;
@@ -675,10 +749,12 @@
 
 	let overMass = $derived(chosenRocket ? totalPayloadMass > chosenRocket.payloadLEO : false);
 	let overVolume = $derived(chosenRocket ? totalPayloadVolume > chosenRocket.fairingVolume_m3 : false);
-	let overAny = $derived(overMass || overVolume);
+	let overDeltaV = $derived(chosenRocket ? totalDeltaV > chosenRocket.maxDeltaV_ms : false);
+	let overAny = $derived(overMass || overVolume || overDeltaV);
 
 	let massPercent = $derived(chosenRocket ? (grandTotalMass / chosenRocket.payloadLEO) * 100 : 0);
 	let volumePercent = $derived(chosenRocket ? (grandTotalVolume / chosenRocket.fairingVolume_m3) * 100 : 0);
+	let deltaVPercent = $derived(chosenRocket ? (totalDeltaV / chosenRocket.maxDeltaV_ms) * 100 : 0);
 
 	let launchesNeeded = $derived(
 		chosenRocket && totalPayloadMass > 0
@@ -849,71 +925,85 @@
 			<div class="mass-bar-container">
 				<div class="mass-bar" style="width: {Math.min(100, volumePercent)}%" class:bar-ok={!overVolume} class:bar-over={overVolume}></div>
 			</div>
+			{#if overDeltaV}
+				<div class="mass-warning mt-1">
+					⚠ Mission ΔV exceeds vehicle max by {((totalDeltaV - chosenRocket.maxDeltaV_ms) / 1000).toFixed(2)} km/s.
+				</div>
+			{/if}
+			<div class="bar-label-row mt-1">
+				<span class="bar-title">ΔV — {(totalDeltaV / 1000).toFixed(2)} km/s / {(chosenRocket.maxDeltaV_ms / 1000).toFixed(1)} km/s</span>
+				<span class="bar-pct">{deltaVPercent.toFixed(0)}%</span>
+			</div>
+			<div class="mass-bar-container">
+				<div class="mass-bar" style="width: {Math.min(100, deltaVPercent)}%" class:bar-ok={!overDeltaV} class:bar-over={overDeltaV}></div>
+			</div>
 		</div>
 	{/if}
 
 	<!-- Fairing Payload Visualization -->
 	{#if fairingViz}
 		{@const fv = fairingViz}
-		{@const pad = 1}
-		{@const svgW = fv.fd + pad * 2}
-		{@const svgH = fv.totalH + pad * 2}
-		{@const cx = svgW / 2}
-		{@const bottom = svgH - pad}
-		{@const cylTop = bottom - fv.cylH}
-		{@const noseTop = cylTop - fv.noseH}
+		{@const pad = 0.6}
+		{@const svgW = fv.totalH + pad * 2}
+		{@const svgH = fv.fd + pad * 2}
+		{@const cy = svgH / 2}
+		{@const left = pad}
+		{@const cylRight = left + fv.cylH}
+		{@const noseRight = cylRight + fv.noseH}
 		<div class="fairing-viz mt-3">
 			<h4 class="section-title">Fairing Layout</h4>
 			<div class="fairing-svg-wrap">
 				<svg viewBox="0 0 {svgW} {svgH}" class="fairing-svg" preserveAspectRatio="xMidYMid meet">
-					<!-- Fairing shell: nose cone + cylinder -->
+					<!-- Fairing shell: cylinder + nose cone (horizontal, nose at right) -->
 					<path
-						d="M {cx},{noseTop}
-						   C {cx + fv.fr * 0.1},{noseTop + fv.noseH * 0.4} {cx + fv.fr * 0.85},{cylTop - fv.noseH * 0.1} {cx + fv.fr},{cylTop}
-						   L {cx + fv.fr},{bottom}
-						   L {cx - fv.fr},{bottom}
-						   L {cx - fv.fr},{cylTop}
-						   C {cx - fv.fr * 0.85},{cylTop - fv.noseH * 0.1} {cx - fv.fr * 0.1},{noseTop + fv.noseH * 0.4} {cx},{noseTop}"
+						d="M {left},{cy - fv.fr}
+						   L {cylRight},{cy - fv.fr}
+						   C {cylRight + fv.noseH * 0.1},{cy - fv.fr * 0.85} {noseRight - fv.noseH * 0.4},{cy - fv.fr * 0.1} {noseRight},{cy}
+						   C {noseRight - fv.noseH * 0.4},{cy + fv.fr * 0.1} {cylRight + fv.noseH * 0.1},{cy + fv.fr * 0.85} {cylRight},{cy + fv.fr}
+						   L {left},{cy + fv.fr}
+						   Z"
 						fill="rgba(99, 102, 241, 0.04)"
 						stroke="#6366f1"
-						stroke-width={fv.fd * 0.018}
+						stroke-width={fv.fd * 0.014}
 						opacity="0.7"
 					/>
-					<!-- Cone/cylinder separation line -->
+					<!-- Cylinder/nose separation line -->
 					<line
-						x1={cx - fv.fr} y1={cylTop} x2={cx + fv.fr} y2={cylTop}
-						stroke="#6366f1" stroke-width={fv.fd * 0.008}
+						x1={cylRight} y1={cy - fv.fr} x2={cylRight} y2={cy + fv.fr}
+						stroke="#6366f1" stroke-width={fv.fd * 0.006}
 						stroke-dasharray="{fv.fd * 0.04} {fv.fd * 0.04}" opacity="0.25"
 					/>
-					<!-- Diameter annotation -->
-					<line x1={cx - fv.fr} y1={bottom + pad * 0.4} x2={cx + fv.fr} y2={bottom + pad * 0.4}
-						stroke="#a5b4fc" stroke-width={fv.fd * 0.008} />
-					<text x={cx} y={bottom + pad * 0.7}
-						text-anchor="middle" font-size={fv.fd * 0.13}
+					<!-- Diameter annotation (left side) -->
+					<line x1={left - pad * 0.3} y1={cy - fv.fr} x2={left - pad * 0.3} y2={cy + fv.fr}
+						stroke="#a5b4fc" stroke-width={fv.fd * 0.006} />
+					<text x={left - pad * 0.45} y={cy}
+						text-anchor="middle" dominant-baseline="middle"
+						font-size={fv.fd * 0.13}
 						fill="#a5b4fc" font-family="'JetBrains Mono', monospace"
-						font-weight="600">⌀{fv.fd}m
+						font-weight="600"
+						transform="rotate(-90 {left - pad * 0.45} {cy})">⌀{fv.fd}m
 					</text>
 
-					<!-- Payloads stacked from bottom -->
+					<!-- Payloads stacked from left -->
 					{#each fv.payloads as pg, i}
-						{@const yOffset = fv.payloads.slice(0, i).reduce((s, p) => s + p.height + fv.gap, 0)}
-						{@const py = bottom - 0.25 - yOffset - pg.height}
-						{@const px = cx - pg.dia / 2}
+						{@const xOffset = fv.payloads.slice(0, i).reduce((s, p) => s + p.height + fv.gap, 0)}
+						{@const px = left + 0.2 + xOffset}
+						{@const py = cy - pg.dia / 2}
 						<rect
 							x={px} y={py}
-							width={pg.dia} height={pg.height}
-							rx={fv.fd * 0.025} ry={fv.fd * 0.025}
+							width={pg.height} height={pg.dia}
+							rx={fv.fd * 0.02} ry={fv.fd * 0.02}
 							fill="{pg.color}18"
 							stroke={pg.color}
-							stroke-width={fv.fd * 0.014}
+							stroke-width={fv.fd * 0.012}
 						/>
 						{#if pg.height > fv.fd * 0.12}
-							<text x={cx} y={py + pg.height / 2}
+							<text x={px + pg.height / 2} y={cy}
 								text-anchor="middle" dominant-baseline="middle"
-								font-size={Math.min(fv.fd * 0.1, pg.height * 0.4, pg.dia * 0.22)}
+								font-size={Math.min(fv.fd * 0.1, pg.dia * 0.35, pg.height * 0.15)}
 								fill={pg.color} font-weight="600"
 								font-family="system-ui, sans-serif">
-								{pg.name.length > 18 ? pg.name.slice(0, 16) + '…' : pg.name}
+								{pg.name.length > 22 ? pg.name.slice(0, 20) + '…' : pg.name}
 							</text>
 						{/if}
 					{/each}
@@ -1131,7 +1221,28 @@
 					<span class="activity-dv" class:dv-zero={dv === 0}>
 						{dv > 0 ? `${dv.toFixed(0)} m/s` : '—'}
 					</span>
-					<span class="activity-desc">{def?.description ?? ''}</span>
+					{#if act.type === 'change-orbit'}
+						<div class="activity-param">
+							<span class="activity-param-label">Target alt:</span>
+							<input
+								class="activity-param-input"
+								type="number"
+								min="100"
+								max="500000"
+								value={act.targetAlt ?? orbitAltitude}
+								oninput={(e) => {
+									const val = parseInt((e.target as HTMLInputElement).value);
+									if (!isNaN(val)) {
+										missionActivities[i].targetAlt = val;
+										missionActivities = [...missionActivities];
+									}
+								}}
+							/>
+							<span class="activity-param-unit">km</span>
+						</div>
+					{:else}
+						<span class="activity-desc">{def?.description ?? ''}</span>
+					{/if}
 					<div class="activity-actions">
 						<button class="act-btn" disabled={i === 0} onclick={() => moveActivity(i, -1)} title="Move up">▲</button>
 						<button class="act-btn" disabled={i === missionActivities.length - 1} onclick={() => moveActivity(i, 1)} title="Move down">▼</button>
@@ -1655,6 +1766,39 @@
 	.activity-icon { font-size: 0.85rem; }
 	.activity-name { font-weight: 600; }
 	.activity-desc { flex: 1; color: var(--color-text-dim); font-size: 0.6rem; }
+
+	.activity-param {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex: 1;
+	}
+	.activity-param-label {
+		font-size: 0.55rem;
+		color: var(--color-text-dim);
+		white-space: nowrap;
+	}
+	.activity-param-input {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.65rem;
+		font-weight: 600;
+		padding: 0.15rem 0.3rem;
+		border-radius: 0.2rem;
+		border: 1px solid var(--color-border);
+		background: var(--color-bg);
+		color: var(--color-text);
+		width: 5rem;
+		appearance: textfield;
+		-moz-appearance: textfield;
+	}
+	.activity-param-input::-webkit-inner-spin-button,
+	.activity-param-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+	.activity-param-input:focus { outline: none; border-color: #6366f1; }
+	.activity-param-unit {
+		font-size: 0.55rem;
+		color: var(--color-text-dim);
+		font-family: 'JetBrains Mono', monospace;
+	}
 	.activity-actions { display: flex; gap: 0.2rem; flex-shrink: 0; }
 	.act-btn {
 		padding: 0.15rem 0.3rem;
@@ -1959,17 +2103,17 @@
 		align-items: flex-start;
 	}
 	.fairing-svg {
-		width: 100%;
-		max-width: 180px;
+		flex: 1;
+		min-width: 0;
 		height: auto;
-		max-height: 320px;
+		max-height: 160px;
 	}
 	.fairing-legend {
 		display: flex;
 		flex-direction: column;
 		gap: 0.3rem;
-		flex: 1;
-		min-width: 0;
+		flex-shrink: 0;
+		width: 180px;
 	}
 	.fairing-dims {
 		display: flex;

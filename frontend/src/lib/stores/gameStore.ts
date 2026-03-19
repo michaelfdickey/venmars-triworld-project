@@ -652,6 +652,9 @@ export interface RocketDef {
 	// Annual maintenance per owned vehicle
 	maintenanceCostM: number;    // $M/yr per vehicle
 	maintenanceMaterials: { material: string; amountMt: number }[];
+	// Refurbishment (reusable rockets only)
+	refurbishmentDays: number;   // days to refurbish after landing (0 = expendable)
+	refurbishmentCostM: number;  // $M per refurbishment cycle
 }
 
 export const reuseModeLabels: Record<ReuseMode, string> = {
@@ -677,6 +680,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.0005 }, { material: 'Inconel / Superalloys', amountMt: 0.00008 },
 			{ material: 'Electricity', amountMt: 0.12 },
 		],
+		refurbishmentDays: 30, refurbishmentCostM: 2,
 	},
 	{
 		id: 'falcon-heavy', name: 'Falcon Heavy', provider: 'SpaceX',
@@ -694,6 +698,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.0003 }, { material: 'Aluminum', amountMt: 0.00015 },
 			{ material: 'Electricity', amountMt: 0.06 },
 		],
+		refurbishmentDays: 45, refurbishmentCostM: 8,
 	},
 	{
 		id: 'falcon-9', name: 'Falcon 9 Block 5', provider: 'SpaceX',
@@ -711,6 +716,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.0002 }, { material: 'Aluminum', amountMt: 0.0001 },
 			{ material: 'Electricity', amountMt: 0.04 },
 		],
+		refurbishmentDays: 30, refurbishmentCostM: 5,
 	},
 	{
 		id: 'sls', name: 'SLS Block 2', provider: 'NASA / Boeing',
@@ -728,6 +734,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.001 }, { material: 'Concrete / Cement', amountMt: 0.002 },
 			{ material: 'Electricity', amountMt: 0.25 },
 		],
+		refurbishmentDays: 0, refurbishmentCostM: 0,
 	},
 	{
 		id: 'new-glenn', name: 'New Glenn', provider: 'Blue Origin',
@@ -745,6 +752,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.0004 }, { material: 'Aluminum', amountMt: 0.0002 },
 			{ material: 'Electricity', amountMt: 0.08 },
 		],
+		refurbishmentDays: 60, refurbishmentCostM: 10,
 	},
 	{
 		id: 'vulcan', name: 'Vulcan Centaur', provider: 'ULA',
@@ -762,6 +770,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.0002 }, { material: 'Aluminum', amountMt: 0.0001 },
 			{ material: 'Electricity', amountMt: 0.05 },
 		],
+		refurbishmentDays: 0, refurbishmentCostM: 0,
 	},
 	{
 		id: 'long-march-9', name: 'Long March 9', provider: 'CASC (China)',
@@ -779,6 +788,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.0008 }, { material: 'Concrete / Cement', amountMt: 0.001 },
 			{ material: 'Electricity', amountMt: 0.18 },
 		],
+		refurbishmentDays: 0, refurbishmentCostM: 0,
 	},
 	{
 		id: 'ariane-6', name: 'Ariane 6 (A64)', provider: 'ArianeGroup (ESA)',
@@ -796,6 +806,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.00015 }, { material: 'Aluminum', amountMt: 0.0001 },
 			{ material: 'Electricity', amountMt: 0.04 },
 		],
+		refurbishmentDays: 0, refurbishmentCostM: 0,
 	},
 	{
 		id: 'neutron', name: 'Neutron', provider: 'Rocket Lab',
@@ -813,6 +824,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.0001 }, { material: 'Carbon Fiber', amountMt: 0.00005 },
 			{ material: 'Electricity', amountMt: 0.02 },
 		],
+		refurbishmentDays: 21, refurbishmentCostM: 3,
 	},
 	{
 		id: 'terran-r', name: 'Terran R', provider: 'Relativity Space',
@@ -830,6 +842,7 @@ export const rocketDefs: RocketDef[] = [
 			{ material: 'Steel', amountMt: 0.00012 }, { material: 'Inconel / Superalloys', amountMt: 0.00004 },
 			{ material: 'Electricity', amountMt: 0.03 },
 		],
+		refurbishmentDays: 45, refurbishmentCostM: 6,
 	},
 ];
 
@@ -863,6 +876,8 @@ export type PayloadCategory = 'comms' | 'weather' | 'nav' | 'science' | 'imaging
 	| 'infrastructure' | 'habitat' | 'vehicle' | 'supply' | 'fuel'
 	| 'terraforming' | 'mining' | 'factory' | 'transport' | 'probe';
 
+export type DeployMethod = 'spin-stabilized' | 'propulsive' | 'docking' | 'electromagnetic' | 'cold-gas' | 'gravity-release';
+
 export interface PayloadDef {
 	id: string;
 	name: string;
@@ -876,6 +891,8 @@ export interface PayloadDef {
 	deltaV: number;          // m/s of onboard propulsion (0 = none)
 	commRange: string;       // communication range descriptor
 	lifespan: number;        // operational lifespan in years (0 = single-use)
+	maxGs: number;           // max acceleration tolerance in g's (0 = no limit / bulk cargo)
+	deployMethod: DeployMethod; // default deployment mechanism
 	description: string;
 	destinations: string[];
 	density_kg_m3?: number;  // fuel only
@@ -925,21 +942,21 @@ export const marketSatellites: PayloadDef[] = [
 	{
 		id: 'geo-comms-heavy', name: 'GEO Comms Satellite (Heavy)', icon: '📡', category: 'comms',
 		mass: 6500, volume: '4m × 2.5m × 2.5m', volume_m3: 25, diameter_m: 2.5, cost: 250,
-		deltaV: 1800, commRange: '36,000 km (GEO coverage)', lifespan: 15,
+		deltaV: 1800, commRange: '36,000 km (GEO coverage)', lifespan: 15, maxGs: 8, deployMethod: 'spin-stabilized',
 		description: 'High-throughput Ka/V-band GEO satellite. 150 Gbps capacity. Industry standard for broadband.',
 		destinations: ['GTO', 'GEO'],
 	},
 	{
 		id: 'leo-comms-constellation', name: 'LEO Broadband Sat', icon: '📡', category: 'comms',
 		mass: 260, volume: '1.1m × 0.7m × 0.3m', volume_m3: 0.23, diameter_m: 0.7, cost: 0.5,
-		deltaV: 350, commRange: '550 km (LEO mesh)', lifespan: 5,
+		deltaV: 350, commRange: '550 km (LEO mesh)', lifespan: 5, maxGs: 15, deployMethod: 'cold-gas',
 		description: 'Flat-pack LEO constellation satellite. Laser crosslinks, phased-array antennas. Bulk-buy discounts.',
 		destinations: ['LEO'],
 	},
 	{
 		id: 'meo-comms', name: 'MEO Comms Satellite', icon: '📡', category: 'comms',
 		mass: 4200, volume: '3m × 2m × 2m', volume_m3: 12, diameter_m: 2.0, cost: 180,
-		deltaV: 1200, commRange: '20,000 km (MEO)', lifespan: 12,
+		deltaV: 1200, commRange: '20,000 km (MEO)', lifespan: 12, maxGs: 10, deployMethod: 'spin-stabilized',
 		description: 'Medium-orbit comms satellite for reduced latency. Military/commercial dual-use.',
 		destinations: ['MEO'],
 	},
@@ -948,14 +965,14 @@ export const marketSatellites: PayloadDef[] = [
 	{
 		id: 'geo-weather', name: 'GEO Weather Monitor', icon: '🌤️', category: 'weather',
 		mass: 3500, volume: '3.5m × 2m × 2m', volume_m3: 14, diameter_m: 2.0, cost: 320,
-		deltaV: 1600, commRange: '36,000 km (GEO)', lifespan: 10,
+		deltaV: 1600, commRange: '36,000 km (GEO)', lifespan: 10, maxGs: 8, deployMethod: 'spin-stabilized',
 		description: 'Geostationary weather platform with multi-spectral imager and lightning mapper. GOES-class.',
 		destinations: ['GTO', 'GEO'],
 	},
 	{
 		id: 'leo-weather', name: 'Polar Weather Satellite', icon: '🌤️', category: 'weather',
 		mass: 2200, volume: '2.5m × 1.5m × 1.5m', volume_m3: 5.6, diameter_m: 1.5, cost: 185,
-		deltaV: 200, commRange: '850 km (LEO polar)', lifespan: 7,
+		deltaV: 200, commRange: '850 km (LEO polar)', lifespan: 7, maxGs: 10, deployMethod: 'spin-stabilized',
 		description: 'Sun-synchronous polar orbiter. Microwave sounder, IR radiometer, ozone mapper.',
 		destinations: ['SSO'],
 	},
@@ -964,14 +981,14 @@ export const marketSatellites: PayloadDef[] = [
 	{
 		id: 'nav-constellation', name: 'Navigation Constellation Sat', icon: '🛰️', category: 'nav',
 		mass: 1200, volume: '2m × 1m × 1m', volume_m3: 2, diameter_m: 1.0, cost: 45,
-		deltaV: 400, commRange: '20,200 km (MEO)', lifespan: 12,
+		deltaV: 400, commRange: '20,200 km (MEO)', lifespan: 12, maxGs: 12, deployMethod: 'spin-stabilized',
 		description: 'Precision PNT satellite (GPS/Galileo-class). Atomic clocks, L-band broadcast.',
 		destinations: ['MEO'],
 	},
 	{
 		id: 'nav-augmentation', name: 'SBAS Augmentation Sat', icon: '🛰️', category: 'nav',
 		mass: 2800, volume: '2.5m × 2m × 2m', volume_m3: 10, diameter_m: 2.0, cost: 120,
-		deltaV: 1400, commRange: '36,000 km (GEO)', lifespan: 15,
+		deltaV: 1400, commRange: '36,000 km (GEO)', lifespan: 15, maxGs: 10, deployMethod: 'spin-stabilized',
 		description: 'GEO-based augmentation satellite. Improves GPS accuracy to sub-meter for aviation & maritime.',
 		destinations: ['GTO', 'GEO'],
 	},
@@ -980,14 +997,14 @@ export const marketSatellites: PayloadDef[] = [
 	{
 		id: 'earth-science', name: 'Earth Observation Platform', icon: '🔭', category: 'science',
 		mass: 3800, volume: '3m × 2.5m × 2.5m', volume_m3: 18.75, diameter_m: 2.5, cost: 350,
-		deltaV: 150, commRange: '700 km (LEO)', lifespan: 8,
+		deltaV: 150, commRange: '700 km (LEO)', lifespan: 8, maxGs: 6, deployMethod: 'spin-stabilized',
 		description: 'Multi-instrument EO satellite: SAR, hyperspectral, thermal. Climate monitoring & land survey.',
 		destinations: ['LEO', 'SSO'],
 	},
 	{
 		id: 'space-telescope', name: 'Optical Survey Telescope', icon: '🔭', category: 'science',
 		mass: 5200, volume: '4m × 2m (folded)', volume_m3: 12.5, diameter_m: 2.0, cost: 800,
-		deltaV: 100, commRange: '1.5M km (L2 deep-space)', lifespan: 20,
+		deltaV: 100, commRange: '1.5M km (L2 deep-space)', lifespan: 20, maxGs: 4, deployMethod: 'propulsive',
 		description: 'Space-based optical/IR telescope for planetary survey and asteroid tracking.',
 		destinations: ['Earth-Sun L2', 'LEO'],
 	},
@@ -996,14 +1013,14 @@ export const marketSatellites: PayloadDef[] = [
 	{
 		id: 'hr-imaging', name: 'High-Res Imaging Sat', icon: '📸', category: 'imaging',
 		mass: 1500, volume: '2m × 1m × 1m', volume_m3: 2, diameter_m: 1.0, cost: 95,
-		deltaV: 200, commRange: '600 km (LEO)', lifespan: 7,
+		deltaV: 200, commRange: '600 km (LEO)', lifespan: 7, maxGs: 8, deployMethod: 'cold-gas',
 		description: '30cm resolution optical + SAR imaging. Commercial Earth observation.',
 		destinations: ['SSO', 'LEO'],
 	},
 	{
 		id: 'radar-sat', name: 'SAR Radar Satellite', icon: '📸', category: 'imaging',
 		mass: 2100, volume: '2.5m × 1.5m × 1.5m', volume_m3: 5.6, diameter_m: 1.5, cost: 160,
-		deltaV: 180, commRange: '700 km (LEO)', lifespan: 7,
+		deltaV: 180, commRange: '700 km (LEO)', lifespan: 7, maxGs: 10, deployMethod: 'spin-stabilized',
 		description: 'Synthetic aperture radar. All-weather, day/night imaging capability.',
 		destinations: ['SSO', 'LEO'],
 	},
@@ -1012,7 +1029,7 @@ export const marketSatellites: PayloadDef[] = [
 	{
 		id: 'cislunar-relay', name: 'Cislunar Relay Satellite', icon: '📡', category: 'relay',
 		mass: 800, volume: '1.5m × 1m × 1m', volume_m3: 1.5, diameter_m: 1.0, cost: 85,
-		deltaV: 600, commRange: '400,000 km (Earth–Moon)', lifespan: 10,
+		deltaV: 600, commRange: '400,000 km (Earth–Moon)', lifespan: 10, maxGs: 12, deployMethod: 'spin-stabilized',
 		description: 'Lunar relay for far-side comms. Ka-band + optical crosslink to Earth ground stations.',
 		destinations: ['Lunar Orbit', 'EML-2'],
 	},
@@ -1024,56 +1041,56 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'venus-atmosphere-probe', name: 'Venus Atmosphere Probe', icon: '🎈', category: 'probe',
 		mass: 800, volume: '1.5m sphere', volume_m3: 1.8, diameter_m: 1.5, cost: 95,
-		deltaV: 0, commRange: '260M km (Venus relay)', lifespan: 0,
+		deltaV: 0, commRange: '260M km (Venus relay)', lifespan: 0, maxGs: 40, deployMethod: 'gravity-release',
 		description: 'Descent probe with spectrometers and pressure/temp sensors for Venus atmospheric profiling.',
 		destinations: ['Venus Atmo'],
 	},
 	{
 		id: 'mars-atmosphere-probe', name: 'Mars Atmosphere Probe', icon: '🎈', category: 'probe',
 		mass: 650, volume: '1.2m capsule', volume_m3: 0.9, diameter_m: 1.2, cost: 75,
-		deltaV: 0, commRange: '400M km (Mars relay)', lifespan: 0,
+		deltaV: 0, commRange: '400M km (Mars relay)', lifespan: 0, maxGs: 30, deployMethod: 'gravity-release',
 		description: 'Entry probe for Mars atmospheric density, composition, and dust profiling.',
 		destinations: ['Mars Atmo'],
 	},
 	{
 		id: 'venus-weather-monitor', name: 'Venus Weather Monitor', icon: '🌤️', category: 'weather',
 		mass: 2800, volume: '3m × 2m × 2m', volume_m3: 12, diameter_m: 2.0, cost: 150,
-		deltaV: 800, commRange: '260M km (Venus orbit)', lifespan: 8,
+		deltaV: 800, commRange: '260M km (Venus orbit)', lifespan: 8, maxGs: 8, deployMethod: 'spin-stabilized',
 		description: 'Orbital weather platform tracking Venus atmospheric changes during terraforming operations.',
 		destinations: ['Venus Orbit'],
 	},
 	{
 		id: 'mars-weather-monitor', name: 'Mars Weather Monitor', icon: '🌤️', category: 'weather',
 		mass: 2400, volume: '2.5m × 2m × 2m', volume_m3: 10, diameter_m: 2.0, cost: 140,
-		deltaV: 600, commRange: '400M km (Mars orbit)', lifespan: 10,
+		deltaV: 600, commRange: '400M km (Mars orbit)', lifespan: 10, maxGs: 8, deployMethod: 'spin-stabilized',
 		description: 'Monitors Mars pressure buildup, dust storms, and temperature evolution during terraforming.',
 		destinations: ['Mars Orbit'],
 	},
 	{
 		id: 'venus-comms-relay', name: 'Venus Comms Relay', icon: '📡', category: 'relay',
 		mass: 4200, volume: '3.5m × 2m × 2m', volume_m3: 14, diameter_m: 2.0, cost: 280,
-		deltaV: 1200, commRange: '260M km (Venus–Earth)', lifespan: 12,
+		deltaV: 1200, commRange: '260M km (Venus–Earth)', lifespan: 12, maxGs: 8, deployMethod: 'propulsive',
 		description: 'Deep-space relay for Venus operations. Ka-band + optical laser link to Earth.',
 		destinations: ['Venus Orbit'],
 	},
 	{
 		id: 'mars-comms-relay', name: 'Mars Comms Relay', icon: '📡', category: 'relay',
 		mass: 4500, volume: '3.5m × 2m × 2m', volume_m3: 14, diameter_m: 2.0, cost: 300,
-		deltaV: 1000, commRange: '400M km (Mars–Earth)', lifespan: 15,
+		deltaV: 1000, commRange: '400M km (Mars–Earth)', lifespan: 15, maxGs: 8, deployMethod: 'propulsive',
 		description: 'High-bandwidth Mars relay. Supports colony communications and science data return.',
 		destinations: ['Mars Orbit'],
 	},
 	{
 		id: 'mars-nav-sat', name: 'Mars Navigation Satellite', icon: '🛰️', category: 'nav',
 		mass: 900, volume: '1.5m × 1m × 1m', volume_m3: 1.5, diameter_m: 1.0, cost: 55,
-		deltaV: 300, commRange: '3,400 km (Mars areosynchronous)', lifespan: 10,
+		deltaV: 300, commRange: '3,400 km (Mars areosynchronous)', lifespan: 10, maxGs: 12, deployMethod: 'spin-stabilized',
 		description: 'Mars GPS-equivalent. 24-satellite constellation provides global positioning on Mars.',
 		destinations: ['Mars Orbit'],
 	},
 	{
 		id: 'venus-floating-drone', name: 'Venus Atmospheric Drone', icon: '🎈', category: 'probe',
 		mass: 400, volume: '3m wingspan', volume_m3: 2, diameter_m: 1.5, cost: 65,
-		deltaV: 0, commRange: '260M km (via relay)', lifespan: 2,
+		deltaV: 0, commRange: '260M km (via relay)', lifespan: 2, maxGs: 6, deployMethod: 'gravity-release',
 		description: 'Solar-powered VTOL drone for Venus cloud-layer surveys and atmospheric sampling at 50-55 km.',
 		destinations: ['Venus Atmo'],
 	},
@@ -1082,42 +1099,42 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'venus-floating-platform', name: 'Venus Floating Platform', icon: '🎈', category: 'infrastructure',
 		mass: 15000, volume: '20m envelope', volume_m3: 200, diameter_m: 5.0, cost: 800,
-		deltaV: 0, commRange: '1,000 km (local mesh)', lifespan: 20,
+		deltaV: 0, commRange: '1,000 km (local mesh)', lifespan: 20, maxGs: 4, deployMethod: 'gravity-release',
 		description: 'Buoyant aerostat platform for Venus cloud layer. Foundation for habitats and ISRU equipment.',
 		destinations: ['Venus Atmo'],
 	},
 	{
 		id: 'fuel-depot', name: 'Fuel Depot Module', icon: '⛽', category: 'infrastructure',
 		mass: 12000, volume: '8m × 4.5m (cylinder)', volume_m3: 127, diameter_m: 4.5, cost: 350,
-		deltaV: 50, commRange: '2,000 km (local)', lifespan: 25,
+		deltaV: 50, commRange: '2,000 km (local)', lifespan: 25, maxGs: 6, deployMethod: 'docking',
 		description: 'Cryogenic propellant storage with solar cryo-coolers. Stores LOX, LH₂, or LCH₄.',
 		destinations: ['LEO', 'Lunar Orbit', 'Mars Orbit', 'Earth-Sun L2'],
 	},
 	{
 		id: 'solar-power-array', name: 'Solar Power Array (Deployable)', icon: '☀️', category: 'infrastructure',
 		mass: 8000, volume: '4m packed → 50m span', volume_m3: 18, diameter_m: 4.0, cost: 180,
-		deltaV: 0, commRange: 'N/A', lifespan: 25,
+		deltaV: 0, commRange: 'N/A', lifespan: 25, maxGs: 5, deployMethod: 'docking',
 		description: '500 kW roll-out solar array. Powers stations, fuel depots, or mass drivers.',
 		destinations: ['LEO', 'Lunar Orbit', 'Venus Orbit', 'Mars Orbit'],
 	},
 	{
 		id: 'orbital-drydock', name: 'Orbital Drydock Truss', icon: '🏗️', category: 'infrastructure',
 		mass: 25000, volume: '20m × 8m × 8m', volume_m3: 1280, diameter_m: 8.0, cost: 600,
-		deltaV: 30, commRange: '2,000 km (local)', lifespan: 30,
+		deltaV: 30, commRange: '2,000 km (local)', lifespan: 30, maxGs: 4, deployMethod: 'docking',
 		description: 'Structural truss for on-orbit assembly of large spacecraft. Robotic arms included.',
 		destinations: ['LEO', 'Lunar Orbit'],
 	},
 	{
 		id: 'mass-driver-segment', name: 'Mass Driver Segment', icon: '⚡', category: 'infrastructure',
 		mass: 18000, volume: '15m × 3m × 3m', volume_m3: 135, diameter_m: 3.0, cost: 420,
-		deltaV: 0, commRange: 'N/A', lifespan: 30,
+		deltaV: 0, commRange: 'N/A', lifespan: 30, maxGs: 6, deployMethod: 'docking',
 		description: 'Electromagnetic accelerator section. 8 segments make one operational mass driver.',
 		destinations: ['Lunar Surface', 'Venus Platform'],
 	},
 	{
 		id: 'radiation-shield', name: 'Radiation Shield Array', icon: '🛡️', category: 'infrastructure',
 		mass: 6000, volume: '5m × 5m panels', volume_m3: 25, diameter_m: 5.0, cost: 90,
-		deltaV: 0, commRange: 'N/A', lifespan: 20,
+		deltaV: 0, commRange: 'N/A', lifespan: 20, maxGs: 8, deployMethod: 'docking',
 		description: 'Water-filled or polyethylene panels for crew radiation protection in deep space.',
 		destinations: ['LEO', 'Lunar Orbit', 'Mars Transit'],
 	},
@@ -1126,35 +1143,35 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'leo-habitat', name: 'LEO Habitat Module', icon: '🏠', category: 'habitat',
 		mass: 20000, volume: '10m × 4.5m (pressurized)', volume_m3: 160, diameter_m: 4.5, cost: 450,
-		deltaV: 0, commRange: '2,000 km (local)', lifespan: 30,
+		deltaV: 0, commRange: '2,000 km (local)', lifespan: 30, maxGs: 4, deployMethod: 'docking',
 		description: 'Standard pressurized crew module for 6. Life support, sleeping quarters, galley.',
 		destinations: ['LEO'],
 	},
 	{
 		id: 'lunar-habitat', name: 'Lunar Surface Habitat', icon: '🌑', category: 'habitat',
 		mass: 15000, volume: '8m × 5m (deployable)', volume_m3: 157, diameter_m: 5.0, cost: 520,
-		deltaV: 0, commRange: '400,000 km (via relay)', lifespan: 20,
+		deltaV: 0, commRange: '400,000 km (via relay)', lifespan: 20, maxGs: 4, deployMethod: 'propulsive',
 		description: 'Inflatable habitat with regolith radiation shielding anchors. Supports 4 crew for 180 days.',
 		destinations: ['Lunar Surface'],
 	},
 	{
 		id: 'venus-habitat', name: 'Venus Floating Habitat', icon: '🎈', category: 'habitat',
 		mass: 9000, volume: '12m envelope + 4m gondola', volume_m3: 50, diameter_m: 4.0, cost: 680,
-		deltaV: 0, commRange: '260M km (via relay)', lifespan: 10,
+		deltaV: 0, commRange: '260M km (via relay)', lifespan: 10, maxGs: 3, deployMethod: 'gravity-release',
 		description: 'Buoyant aerostat habitat for Venus cloud layer (50-55 km). Acid-resistant envelope. 4 crew.',
 		destinations: ['Venus Atmo'],
 	},
 	{
 		id: 'mars-habitat', name: 'Mars Surface Habitat', icon: '🔴', category: 'habitat',
 		mass: 22000, volume: '10m × 6m (pressurized)', volume_m3: 283, diameter_m: 6.0, cost: 580,
-		deltaV: 0, commRange: '400M km (via relay)', lifespan: 25,
+		deltaV: 0, commRange: '400M km (via relay)', lifespan: 25, maxGs: 4, deployMethod: 'propulsive',
 		description: 'Insulated & pressurized for Mars surface ops. ISRU water extraction, CO₂ filtration, 6 crew.',
 		destinations: ['Mars Surface'],
 	},
 	{
 		id: 'transit-habitat', name: 'Deep-Space Transit Hab', icon: '🚀', category: 'habitat',
 		mass: 35000, volume: '12m × 5m (with centrifuge)', volume_m3: 236, diameter_m: 5.0, cost: 900,
-		deltaV: 0, commRange: '400M km (deep-space)', lifespan: 20,
+		deltaV: 0, commRange: '400M km (deep-space)', lifespan: 20, maxGs: 3, deployMethod: 'docking',
 		description: 'Long-duration crew module with partial-gravity centrifuge. For Earth–Mars or Earth–Venus transits.',
 		destinations: ['Mars Transit', 'Venus Transit'],
 	},
@@ -1163,28 +1180,28 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'crew-capsule', name: 'Crew Reentry Vehicle', icon: '🛡️', category: 'vehicle',
 		mass: 9000, volume: '5m × 3.5m (capsule)', volume_m3: 48, diameter_m: 3.5, cost: 210,
-		deltaV: 50, commRange: '40,000 km (Earth vicinity)', lifespan: 1,
+		deltaV: 50, commRange: '40,000 km (Earth vicinity)', lifespan: 1, maxGs: 6, deployMethod: 'propulsive',
 		description: 'PICA-X heat shield capsule for Earth or Mars atmospheric reentry. 4–6 crew.',
 		destinations: ['Earth Return', 'Mars Entry'],
 	},
 	{
 		id: 'lunar-lander', name: 'Lunar Lander (Cargo)', icon: '🌑', category: 'vehicle',
 		mass: 11000, volume: '7m × 4m', volume_m3: 88, diameter_m: 4.0, cost: 320,
-		deltaV: 2500, commRange: '400,000 km (via relay)', lifespan: 0,
+		deltaV: 2500, commRange: '400,000 km (via relay)', lifespan: 0, maxGs: 8, deployMethod: 'propulsive',
 		description: 'Autonomous cargo lander for lunar surface. 15t payload to surface from LLO.',
 		destinations: ['Lunar Surface'],
 	},
 	{
 		id: 'mars-lander', name: 'Mars Cargo Lander', icon: '🔴', category: 'vehicle',
 		mass: 14000, volume: '8m × 5m', volume_m3: 157, diameter_m: 5.0, cost: 380,
-		deltaV: 800, commRange: '400M km (via relay)', lifespan: 0,
+		deltaV: 800, commRange: '400M km (via relay)', lifespan: 0, maxGs: 10, deployMethod: 'propulsive',
 		description: 'Supersonic retro-propulsion lander for Mars. Delivers 20t to surface from Mars orbit.',
 		destinations: ['Mars Surface'],
 	},
 	{
 		id: 'ion-tug', name: 'Orbital Tug (Ion)', icon: '🔧', category: 'vehicle',
 		mass: 3500, volume: '4m × 2m', volume_m3: 12.5, diameter_m: 2.0, cost: 140,
-		deltaV: 8000, commRange: '2,000 km (local)', lifespan: 15,
+		deltaV: 8000, commRange: '2,000 km (local)', lifespan: 15, maxGs: 0.5, deployMethod: 'propulsive',
 		description: 'Solar-electric propulsion tug for slow but efficient cargo transfers between orbits.',
 		destinations: ['Cislunar', 'Earth–Mars Transfer'],
 	},
@@ -1193,35 +1210,35 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'consumables-pod', name: 'Crew Consumables Pod', icon: '🍱', category: 'supply',
 		mass: 6000, volume: '3m × 2.5m', volume_m3: 14.7, diameter_m: 2.5, cost: 35,
-		deltaV: 0, commRange: 'N/A', lifespan: 0,
+		deltaV: 0, commRange: 'N/A', lifespan: 0, maxGs: 10, deployMethod: 'cold-gas',
 		description: 'Food, water, O₂, medical supplies for 6 crew × 90 days.',
 		destinations: ['LEO', 'Lunar Orbit', 'Mars Orbit'],
 	},
 	{
 		id: 'isru-pack', name: 'ISRU Equipment Pack', icon: '⚙️', category: 'mining',
 		mass: 8500, volume: '4m × 3m × 2m', volume_m3: 24, diameter_m: 3.0, cost: 200,
-		deltaV: 0, commRange: 'N/A', lifespan: 10,
+		deltaV: 0, commRange: 'N/A', lifespan: 10, maxGs: 8, deployMethod: 'cold-gas',
 		description: 'In-situ resource processing: Sabatier reactor, electrolyzer, regolith oven, controls.',
 		destinations: ['Lunar Surface', 'Mars Surface'],
 	},
 	{
 		id: 'construction-pallet', name: 'Construction Material Pallet', icon: '🧱', category: 'supply',
 		mass: 20000, volume: '4m × 4m × 3m (pallet)', volume_m3: 48, diameter_m: 4.0, cost: 25,
-		deltaV: 0, commRange: 'N/A', lifespan: 0,
+		deltaV: 0, commRange: 'N/A', lifespan: 0, maxGs: 0, deployMethod: 'gravity-release',
 		description: 'Bulk structural materials: aluminum beams, fasteners, wiring, piping, insulation.',
 		destinations: ['LEO', 'Lunar Surface', 'Mars Surface'],
 	},
 	{
 		id: 'spare-parts', name: 'Spare Parts & Tools Kit', icon: '🔧', category: 'supply',
 		mass: 3000, volume: '2m × 1.5m × 1m', volume_m3: 3, diameter_m: 1.5, cost: 40,
-		deltaV: 0, commRange: 'N/A', lifespan: 0,
+		deltaV: 0, commRange: 'N/A', lifespan: 0, maxGs: 0, deployMethod: 'cold-gas',
 		description: 'Replacement pumps, valves, seals, electronics, and EVA tooling.',
 		destinations: ['LEO', 'Lunar Surface', 'Mars Surface'],
 	},
 	{
 		id: 'fission-reactor', name: 'Nuclear Fission Power Unit', icon: '☢️', category: 'supply',
 		mass: 7500, volume: '3m × 2m (shielded)', volume_m3: 9.4, diameter_m: 2.0, cost: 500,
-		deltaV: 0, commRange: 'N/A', lifespan: 30,
+		deltaV: 0, commRange: 'N/A', lifespan: 30, maxGs: 6, deployMethod: 'propulsive',
 		description: '40 kW fission reactor for surface ops where solar is limited (Mars night, polar, dust storms).',
 		destinations: ['Lunar Surface', 'Mars Surface'],
 	},
@@ -1230,7 +1247,7 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'fuel-lox', name: 'LOX (Liquid Oxygen)', icon: '🧊', category: 'fuel',
 		mass: 0, volume: 'Fills remaining fairing', volume_m3: 0, diameter_m: 0, cost: 0.2,
-		deltaV: 0, commRange: 'N/A', lifespan: 0,
+		deltaV: 0, commRange: 'N/A', lifespan: 0, maxGs: 0, deployMethod: 'gravity-release',
 		description: 'Cryogenic oxidizer. High density. Used with LH₂, LCH₄, or RP-1.',
 		destinations: ['LEO', 'Lunar Orbit', 'Mars Orbit', 'Fuel Depot'],
 		density_kg_m3: 1141,
@@ -1238,7 +1255,7 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'fuel-lh2', name: 'LH₂ (Liquid Hydrogen)', icon: '💨', category: 'fuel',
 		mass: 0, volume: 'Fills remaining fairing', volume_m3: 0, diameter_m: 0, cost: 0.8,
-		deltaV: 0, commRange: 'N/A', lifespan: 0,
+		deltaV: 0, commRange: 'N/A', lifespan: 0, maxGs: 0, deployMethod: 'gravity-release',
 		description: 'Ultra-low density cryogenic fuel. Best Isp but volume-hungry.',
 		destinations: ['LEO', 'Lunar Orbit', 'Mars Orbit', 'Fuel Depot'],
 		density_kg_m3: 71,
@@ -1246,7 +1263,7 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'fuel-lch4', name: 'LCH₄ (Liquid Methane)', icon: '🔥', category: 'fuel',
 		mass: 0, volume: 'Fills remaining fairing', volume_m3: 0, diameter_m: 0, cost: 0.5,
-		deltaV: 0, commRange: 'N/A', lifespan: 0,
+		deltaV: 0, commRange: 'N/A', lifespan: 0, maxGs: 0, deployMethod: 'gravity-release',
 		description: 'Mid-density cryogenic fuel. ISRU-producible on Mars.',
 		destinations: ['LEO', 'Lunar Orbit', 'Mars Orbit', 'Fuel Depot'],
 		density_kg_m3: 423,
@@ -1254,7 +1271,7 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'fuel-rp1', name: 'RP-1 (Rocket-Grade Kerosene)', icon: '🛢️', category: 'fuel',
 		mass: 0, volume: 'Fills remaining fairing', volume_m3: 0, diameter_m: 0, cost: 0.3,
-		deltaV: 0, commRange: 'N/A', lifespan: 0,
+		deltaV: 0, commRange: 'N/A', lifespan: 0, maxGs: 0, deployMethod: 'gravity-release',
 		description: 'Dense storable hydrocarbon fuel. Easiest to handle but lower Isp.',
 		destinations: ['LEO', 'Fuel Depot'],
 		density_kg_m3: 820,
@@ -1262,7 +1279,7 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'fuel-hydrazine', name: 'Hydrazine (N₂H₄)', icon: '⚗️', category: 'fuel',
 		mass: 0, volume: 'Fills remaining fairing', volume_m3: 0, diameter_m: 0, cost: 1.5,
-		deltaV: 0, commRange: 'N/A', lifespan: 0,
+		deltaV: 0, commRange: 'N/A', lifespan: 0, maxGs: 0, deployMethod: 'gravity-release',
 		description: 'Storable hypergolic monopropellant. Dense but toxic.',
 		destinations: ['LEO', 'Lunar Orbit', 'Mars Orbit', 'Fuel Depot'],
 		density_kg_m3: 1021,
@@ -1272,21 +1289,21 @@ export const venMarsPayloads: PayloadDef[] = [
 	{
 		id: 'venus-atmosphere-processor', name: 'Venus Atmosphere Processor', icon: '🌍', category: 'terraforming',
 		mass: 12000, volume: '6m × 4m × 4m', volume_m3: 96, diameter_m: 4.0, cost: 450,
-		deltaV: 0, commRange: '1,000 km (local mesh)', lifespan: 15,
+		deltaV: 0, commRange: '1,000 km (local mesh)', lifespan: 15, maxGs: 5, deployMethod: 'propulsive',
 		description: 'CO₂ cracker & sulfur scrubber for Venus cloud-top operations. Processes 500 t/day of atmosphere.',
 		destinations: ['Venus Platform'],
 	},
 	{
 		id: 'mars-greenhouse', name: 'Mars Greenhouse Module', icon: '🌱', category: 'terraforming',
 		mass: 8000, volume: '10m × 5m × 3m', volume_m3: 150, diameter_m: 5.0, cost: 280,
-		deltaV: 0, commRange: 'N/A', lifespan: 20,
+		deltaV: 0, commRange: 'N/A', lifespan: 20, maxGs: 4, deployMethod: 'propulsive',
 		description: 'Pressurized greenhouse for Mars food production. Supplements ISRU oxygen generation.',
 		destinations: ['Mars Surface'],
 	},
 	{
 		id: 'solar-mirror', name: 'Orbital Solar Mirror', icon: '☀️', category: 'terraforming',
 		mass: 2000, volume: '2m packed → 100m span', volume_m3: 6, diameter_m: 2.0, cost: 150,
-		deltaV: 200, commRange: '50,000 km (formation)', lifespan: 25,
+		deltaV: 200, commRange: '50,000 km (formation)', lifespan: 25, maxGs: 5, deployMethod: 'spin-stabilized',
 		description: 'Deployable reflective film mirror for redirecting sunlight to Mars polar caps.',
 		destinations: ['Mars Orbit'],
 	},
@@ -1297,3 +1314,9 @@ export const customPayloads = writable<PayloadDef[]>([]);
 
 // Payload inventory: payload id → count owned/ordered
 export const payloadInventory = writable<Record<string, number>>({});
+
+// Reserved payloads: payload id → count allocated to scheduled missions
+export const reservedPayloads = writable<Record<string, number>>({});
+
+// Reserved rockets: rocket id → count allocated to scheduled missions
+export const reservedRockets = writable<Record<string, number>>({});

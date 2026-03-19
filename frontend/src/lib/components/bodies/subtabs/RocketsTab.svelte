@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { rocketDefs, rocketInventory, launchComplexCosts, claimedComplexes, type RocketDef, type ReuseMode, reuseModeLabels } from '$lib/stores/gameStore';
+	import { rocketDefs, rocketInventory, reservedRockets, launchComplexCosts, claimedComplexes, type RocketDef, type ReuseMode, reuseModeLabels } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -12,6 +12,10 @@
 
 	function getGlobalAvailable(rocket: RocketDef): number {
 		return Math.max(0, rocket.globalInventory - getOwned(rocket.id));
+	}
+
+	function getReserved(rocketId: string): number {
+		return $reservedRockets[rocketId] ?? 0;
 	}
 
 	function purchase(rocket: RocketDef) {
@@ -125,6 +129,8 @@
 		{#each sortedRockets as rocket}
 			{@const owned = getOwned(rocket.id)}
 			{@const available = getGlobalAvailable(rocket)}
+			{@const reserved = getReserved(rocket.id)}
+			{@const freeOwned = Math.max(0, owned - reserved)}
 			{@const hasBase = $claimedComplexes.has(rocket.homeBase)}
 			{@const fuel = rocketFuel[rocket.id]}
 			<div class="rocket-card" style="border-color: {rocket.color}44; --rc: {rocket.color};">
@@ -412,6 +418,14 @@
 
 							<span class="inv-label">Owned</span>
 							<span class="inv-val inv-owned" style="color: {owned > 0 ? rocket.color : 'var(--color-text-dim)'}">{owned}</span>
+
+							{#if reserved > 0}
+								<span class="inv-label">Reserved</span>
+								<span class="inv-val" style="color: #f59e0b">{reserved}</span>
+
+								<span class="inv-label">Free</span>
+								<span class="inv-val" style="color: {freeOwned > 0 ? '#4ade80' : '#ef4444'}">{freeOwned}</span>
+							{/if}
 						</div>
 
 						<div class="inv-actions">
@@ -429,6 +443,13 @@
 							<div class="inv-maint">
 								<span class="inv-maint-label">Maintenance</span>
 								<span class="inv-maint-val">${(owned * rocket.maintenanceCostM).toFixed(0)}M/yr</span>
+							</div>
+						{/if}
+
+						{#if rocket.reusable && rocket.refurbishmentDays > 0}
+							<div class="inv-refurb">
+								<span class="inv-refurb-label">Refurb</span>
+								<span class="inv-refurb-val">{rocket.refurbishmentDays}d · ${rocket.refurbishmentCostM}M</span>
 							</div>
 						{/if}
 
@@ -877,6 +898,25 @@
 		font-family: 'JetBrains Mono', monospace;
 		font-size: 0.6rem;
 		color: #fbbf24;
+		font-weight: 600;
+	}
+
+	.inv-refurb {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.inv-refurb-label {
+		font-size: 0.45rem;
+		color: var(--color-text-dim);
+		text-transform: uppercase;
+	}
+
+	.inv-refurb-val {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.55rem;
+		color: #60a5fa;
 		font-weight: 600;
 	}
 

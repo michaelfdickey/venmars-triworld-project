@@ -279,15 +279,42 @@
 		siteGroup.visible = show;
 	});
 
+	// Map short mission site names → LAUNCH_SITES keys
+	const SITE_NAME_ALIASES: Record<string, string> = {
+		'Kennedy Space Center':     'Kennedy Space Center (LC-39A)',
+		'Cape Canaveral SFS':       'Cape Canaveral SFS (SLC-40)',
+		'Vandenberg SFB':           'Vandenberg SFB (SLC-4E)',
+		'Boca Chica Starbase':      'Starbase Boca Chica',
+		'Kourou (CSG)':             'Guiana Space Centre',
+		'Baikonur':                 'Baikonur Cosmodrome',
+		'Wenchang':                 'Wenchang Space Launch Site',
+		'Satish Dhawan':            'Satish Dhawan Space Centre',
+		'Tanegashima':              'Xichang Satellite Launch Center',
+		'Wallops Island':           'Jiuquan Satellite Launch Center',
+	};
+
+	function resolveSite(name: string): [number, number] | null {
+		return LAUNCH_SITES[name] ?? LAUNCH_SITES[SITE_NAME_ALIASES[name] ?? ''] ?? null;
+	}
+
 	// ── Build mission visuals for one mission ────────────
 	function buildMissionVisuals(m: ScheduledMissionMapData, group: THREE.Group) {
-		const siteLoc = LAUNCH_SITES[m.site];
-		if (!siteLoc) return;
-		const [siteLat, siteLng] = siteLoc;
-		const sitePos = latLngToVec3(siteLat, siteLng, EARTH_RADIUS * 1.001);
+		const siteLoc = resolveSite(m.site);
+		const siteLat = siteLoc ? siteLoc[0] : 0;
+		const siteLng = siteLoc ? siteLoc[1] : 0;
 		const raanDeg = siteLng;
 
-		// Track current orbit state as we walk through activities
+		// Always draw the target orbit ring
+		const ringGeo = makeOrbitRing(m.altitude, m.inclination, raanDeg);
+		const ringLine = new THREE.Line(ringGeo, dashedLineMat(COL_ORBIT));
+		ringLine.computeLineDistances();
+		group.add(ringLine);
+
+		// Skip activity visuals if we can't resolve the launch site
+		if (!siteLoc) return;
+
+		// Track state as we walk through activities
+		const sitePos = latLngToVec3(siteLat, siteLng, EARTH_RADIUS * 1.001);
 		let currentAlt = m.altitude;
 		let currentInc = m.inclination;
 		let orbitIndex = 0;
@@ -295,27 +322,20 @@
 		for (const act of m.activities) {
 			switch (act.type) {
 				case 'launch-to-orbit': {
-					// Arc from surface to parking orbit (200 km or target)
 					const parkingAlt = Math.min(200, currentAlt);
 					const parkingR = altToRadius(parkingAlt);
-					// Point on orbit directly above launch site
 					const orbitAbove = latLngToVec3(siteLat, siteLng, parkingR);
-					const peakR = altToRadius(parkingAlt * 0.6); // arc peaks slightly
+					const peakR = altToRadius(parkingAlt * 0.6);
 					const arcGeo = makeArc(sitePos, orbitAbove, peakR + (parkingR - EARTH_RADIUS) * 0.3, 48);
 					const arcLine = new THREE.Line(arcGeo, dashedLineMat(COL_LAUNCH_ARC, 0.9));
 					arcLine.computeLineDistances();
 					group.add(arcLine);
-					// Launch site dot
 					group.add(makeEventDot(sitePos, COL_LAUNCH_ARC));
 					break;
 				}
 
 				case 'circularize': {
-					// Draw the main orbit ring at current altitude
-					const ringGeo = makeOrbitRing(currentAlt, currentInc, raanDeg);
-					const ringLine = new THREE.Line(ringGeo, dashedLineMat(COL_ORBIT));
-					ringLine.computeLineDistances();
-					group.add(ringLine);
+					// Ring already drawn above; just bump index
 					orbitIndex++;
 					break;
 				}
@@ -455,6 +475,7 @@
 
 	// ── Reactive: rebuild when store changes ─────────────
 	$effect(() => {
+		if (!mounted) return;
 		const missions = $scheduledMissionsStore;
 		const visible = showMissions;
 		rebuildMissions(visible ? missions : []);

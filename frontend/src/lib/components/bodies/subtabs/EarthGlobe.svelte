@@ -666,9 +666,30 @@
 		renderer.domElement.addEventListener('click', onCanvasClick);
 
 		// ── Render loop ───────────────────────────────────
+		// At distances > LOCK_DIST, markers scale normally with the globe.
+		// At distances < LOCK_DIST, markers shrink to maintain constant apparent
+		// (screen) size — they stop getting bigger as you zoom in further.
+		const LOCK_DIST = 2.8;
+
 		function animate() {
 			frameId = requestAnimationFrame(animate);
 			controls.update();
+
+			// Per-marker scale to lock apparent size when zoomed in
+			if (siteGroup.visible) {
+				const dist = camera.position.length();
+				if (dist < LOCK_DIST) {
+					const s = dist / LOCK_DIST; // <1 when closer, exactly 1 at threshold
+					for (const child of siteGroup.children) {
+						child.scale.setScalar(s);
+					}
+				} else {
+					for (const child of siteGroup.children) {
+						child.scale.setScalar(1);
+					}
+				}
+			}
+
 			renderer.render(scene, camera);
 		}
 		animate();

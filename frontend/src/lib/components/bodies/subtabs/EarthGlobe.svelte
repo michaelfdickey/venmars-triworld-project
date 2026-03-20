@@ -2,10 +2,51 @@
 	import { onMount } from 'svelte';
 	import * as THREE from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+	import { scheduledMissionsStore, gameTime, gameTimeToDate, claimedComplexes, type ScheduledMissionMapData } from '$lib/stores/gameStore';
+
+	let { onSiteClick = (_name: string) => {} }: { onSiteClick?: (name: string) => void } = $props();
 
 	// ── Constants ─────────────────────────────────────────
 	const EARTH_RADIUS = 1;           // unit sphere
+	const EARTH_RADIUS_KM = 6371;     // km
 	const ATMOSPHERE_SCALE = 1.015;   // thin glow shell
+
+	// Colors
+	const COL_ORBIT = 0xeab308;       // yellow
+	const COL_LAUNCH_ARC = 0xf97316;  // orange
+	const COL_DEORBIT = 0xef4444;     // red
+	const COL_BOOSTER = 0x22c55e;     // green
+	const COL_EVENT = 0x60a5fa;       // light blue
+	const COL_DEPLOY = 0xa78bfa;      // violet
+	const COL_TRANSFER = 0x38bdf8;    // cyan
+
+	// Launch site coordinates (name → lat/lng)
+	const LAUNCH_SITES: Record<string, [number, number]> = {
+		'Kennedy Space Center (LC-39A)':      [28.5731, -80.6490],
+		'Cape Canaveral SFS (SLC-40)':        [28.5622, -80.5771],
+		'Baikonur Cosmodrome':                [45.9646,  63.3052],
+		'Vandenberg SFB (SLC-4E)':            [34.7420, -120.5724],
+		'Xichang Satellite Launch Center':    [28.2468, 102.0268],
+		'Wenchang Space Launch Site':         [19.6145, 110.9510],
+		'Jiuquan Satellite Launch Center':    [40.9606, 100.2910],
+		'Satish Dhawan Space Centre':         [13.7199,  80.2304],
+		'Guiana Space Centre':                [ 5.2322, -52.7693],
+		'Starbase Boca Chica':                [25.9972, -97.1571],
+	};
+
+	// Name → complex ID for ownership checks
+	const SITE_NAME_TO_ID: Record<string, string> = {
+		'Kennedy Space Center (LC-39A)':      'ksc-39a',
+		'Cape Canaveral SFS (SLC-40)':        'ccafs-40',
+		'Baikonur Cosmodrome':                'baikonur',
+		'Vandenberg SFB (SLC-4E)':            'vandenberg',
+		'Xichang Satellite Launch Center':    'xichang',
+		'Wenchang Space Launch Site':         'wenchang',
+		'Jiuquan Satellite Launch Center':    'jiuquan',
+		'Satish Dhawan Space Centre':         'sriharikota',
+		'Guiana Space Centre':                'kourou',
+		'Starbase Boca Chica':                'starbase',
+	};
 
 	// ── DOM & Three refs ──────────────────────────────────
 	let container: HTMLDivElement;
@@ -16,12 +57,31 @@
 	let earthMesh: THREE.Mesh;
 	let frameId: number;
 
+	// Mission visualization group (cleared/rebuilt on data change)
+	let missionGroup: THREE.Group;
+	// Launch site markers group
+	let siteGroup: THREE.Group;
+
+	// ── Light refs (updated reactively for day/night) ─────
+	let sunLight: THREE.DirectionalLight;
+	let ambientLight: THREE.AmbientLight;
+	let fillLight: THREE.DirectionalLight;
+	let backLight: THREE.DirectionalLight;
+	let topLight: THREE.DirectionalLight;
+	let bottomLight: THREE.DirectionalLight;
+
+	// ── Visibility toggles ────────────────────────────────
+	let showMissions = $state(true);
+	let showDayNight = $state(false);
+	let showLaunchSites = $state(true);
+	let mounted = $state(false);
+
 	// ── Camera presets ────────────────────────────────────
 	type ViewPreset = 'free' | 'north' | 'south';
 	let activePreset = $state<ViewPreset>('free');
 
 	function flyTo(lat: number, _lng: number, distance: number) {
-		// Convert lat/lng to camera position on sphere
+		if (!camera || !controls) return;
 		const phi = (90 - lat) * (Math.PI / 180);
 		const theta = (_lng + 180) * (Math.PI / 180);
 		const target = new THREE.Vector3(
@@ -30,12 +90,11 @@
 			distance * Math.sin(phi) * Math.sin(theta)
 		);
 
-		// Animate with simple lerp
 		const start = camera.position.clone();
 		const startTarget = controls.target.clone();
 		const endTarget = new THREE.Vector3(0, 0, 0);
 		let t = 0;
-		const dur = 60; // frames
+		const dur = 60;
 
 		function step() {
 			t++;
@@ -61,6 +120,387 @@
 		}
 	}
 
+	// ── Geo → 3D conversion ──────────────────────────────
+	// Earth mesh is rotated Y = -PI/2 so prime meridian faces camera.
+	// We apply the same offset so lat/lng map correctly.
+	function latLngToVec3(lat: number, lng: number, r: number): THREE.Vector3 {
+		const phi = (90 - lat) * (Math.PI / 180);
+		const theta = (lng + 90) * (Math.PI / 180);  // +90 compensates for mesh rotation
+		return new THREE.Vector3(
+			-r * Math.sin(phi) * Math.cos(theta),
+			 r * Math.cos(phi),
+			 r * Math.sin(phi) * Math.sin(theta)
+		);
+	}
+
+	function altToRadius(altKm: number): number {
+		return EARTH_RADIUS * (1 + altKm / EARTH_RADIUS_KM);
+	}
+
+	// ── Orbit ring geometry ──────────────────────────────
+	function makeOrbitRing(
+		altKm: number,
+		incDeg: number,
+		raanDeg: number,  // right ascension of ascending node (use launch site lng)
+		segments: number = 256,
+	): THREE.BufferGeometry {
+		const r = altToRadius(altKm);
+		const inc = incDeg * Math.PI / 180;
+		const raan = (raanDeg + 90) * Math.PI / 180; // compensate for Earth mesh rotation
+
+		const positions = new Float32Array((segments + 1) * 3);
+		for (let i = 0; i <= segments; i++) {
+			const u = (i / segments) * Math.PI * 2; // argument of latitude
+			// Position in orbital plane (x = along orbit, y = 0, z = out of plane)
+			const xOrb = r * Math.cos(u);
+			const zOrb = r * Math.sin(u);
+			// Rotate by inclination around x-axis, then by RAAN around y-axis
+			const x = xOrb * Math.cos(raan) - zOrb * Math.sin(inc) * Math.sin(raan);
+			const y = zOrb * Math.sin(inc) * Math.cos(0) + zOrb * Math.cos(inc) * 0 ;
+			// Full rotation: orbital plane → 3D
+			// In orbital plane: p = (cos(u), 0, sin(u)) * r
+			// Rotate by inc around X: (cos(u), -sin(u)*sin(inc), sin(u)*cos(inc)) * r  -- wait, that's not right
+			// Let me use proper rotation matrices
+			const px = r * Math.cos(u);
+			const py = 0;
+			const pz = r * Math.sin(u);
+			// Rotate by inclination around X-axis
+			const rx = px;
+			const ry = py * Math.cos(inc) - pz * Math.sin(inc);
+			const rz = py * Math.sin(inc) + pz * Math.cos(inc);
+			// Rotate by RAAN around Y-axis
+			const fx = rx * Math.cos(raan) + rz * Math.sin(raan);
+			const fy = ry;
+			const fz = -rx * Math.sin(raan) + rz * Math.cos(raan);
+
+			positions[i * 3]     = fx;
+			positions[i * 3 + 1] = fy;
+			positions[i * 3 + 2] = fz;
+		}
+		const geo = new THREE.BufferGeometry();
+		geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+		return geo;
+	}
+
+	// ── Curved arc between two 3D points ─────────────────
+	function makeArc(
+		from: THREE.Vector3,
+		to: THREE.Vector3,
+		peakRadius: number,
+		segments: number = 64,
+	): THREE.BufferGeometry {
+		const positions = new Float32Array((segments + 1) * 3);
+		for (let i = 0; i <= segments; i++) {
+			const t = i / segments;
+			// Slerp on the unit sphere direction
+			const dir = new THREE.Vector3().lerpVectors(from.clone().normalize(), to.clone().normalize(), t).normalize();
+			// Radius interpolation: parabolic peak in the middle
+			const rFrom = from.length();
+			const rTo = to.length();
+			const rBase = rFrom + (rTo - rFrom) * t;
+			const lift = 4 * t * (1 - t) * (peakRadius - (rFrom + rTo) / 2);
+			const r = rBase + lift;
+			const p = dir.multiplyScalar(r);
+			positions[i * 3]     = p.x;
+			positions[i * 3 + 1] = p.y;
+			positions[i * 3 + 2] = p.z;
+		}
+		const geo = new THREE.BufferGeometry();
+		geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+		return geo;
+	}
+
+	// ── Dashed line material helper ──────────────────────
+	function dashedLineMat(color: number, opacity: number = 0.8): THREE.LineDashedMaterial {
+		return new THREE.LineDashedMaterial({
+			color,
+			dashSize: 0.03,
+			gapSize: 0.015,
+			opacity,
+			transparent: true,
+		});
+	}
+
+	function solidLineMat(color: number, opacity: number = 0.7): THREE.LineBasicMaterial {
+		return new THREE.LineBasicMaterial({ color, opacity, transparent: true });
+	}
+
+	// ── Event dot (small sphere) ─────────────────────────
+	const dotGeo = new THREE.SphereGeometry(0.012, 8, 6);
+	const siteDotGeo = new THREE.SphereGeometry(0.009, 10, 8);
+	const siteRingGeo = new THREE.RingGeometry(0.011, 0.015, 16);
+
+	function makeEventDot(position: THREE.Vector3, color: number): THREE.Mesh {
+		const mat = new THREE.MeshBasicMaterial({ color });
+		const mesh = new THREE.Mesh(dotGeo, mat);
+		mesh.position.copy(position);
+		return mesh;
+	}
+
+	// ── Build launch site markers ────────────────────────
+	function buildSiteMarkers(group: THREE.Group, claimed: Set<string>) {
+		// Clear previous
+		while (group.children.length > 0) {
+			const child = group.children[0];
+			group.remove(child);
+			if (child instanceof THREE.Mesh && child.geometry !== siteDotGeo && child.geometry !== siteRingGeo) {
+				child.geometry.dispose();
+			}
+		}
+
+		for (const [name, [lat, lng]] of Object.entries(LAUNCH_SITES)) {
+			const pos = latLngToVec3(lat, lng, EARTH_RADIUS * 1.002);
+			const siteId = SITE_NAME_TO_ID[name];
+			const owned = siteId ? claimed.has(siteId) : false;
+			const col = owned ? 0x22c55e : 0xf97316; // green if claimed, orange otherwise
+			// Dot
+			const dotMat = new THREE.MeshBasicMaterial({ color: col });
+			const dot = new THREE.Mesh(siteDotGeo, dotMat);
+			dot.position.copy(pos);
+			dot.lookAt(pos.clone().multiplyScalar(2));
+			dot.userData = { siteName: name };
+			group.add(dot);
+			// Halo ring
+			const ringMat = new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide, opacity: 0.4, transparent: true });
+			const ring = new THREE.Mesh(siteRingGeo, ringMat);
+			ring.position.copy(pos);
+			ring.lookAt(pos.clone().multiplyScalar(2));
+			ring.userData = { siteName: name };
+			group.add(ring);
+		}
+	}
+
+	// ── Reactive: show/hide + rebuild launch site markers ──
+	$effect(() => {
+		if (!mounted) return;
+		const show = showLaunchSites;
+		const claimed = $claimedComplexes;
+		if (show) buildSiteMarkers(siteGroup, claimed);
+		siteGroup.visible = show;
+	});
+
+	// ── Build mission visuals for one mission ────────────
+	function buildMissionVisuals(m: ScheduledMissionMapData, group: THREE.Group) {
+		const siteLoc = LAUNCH_SITES[m.site];
+		if (!siteLoc) return;
+		const [siteLat, siteLng] = siteLoc;
+		const sitePos = latLngToVec3(siteLat, siteLng, EARTH_RADIUS * 1.001);
+		const raanDeg = siteLng;
+
+		// Track current orbit state as we walk through activities
+		let currentAlt = m.altitude;
+		let currentInc = m.inclination;
+		let orbitIndex = 0;
+
+		for (const act of m.activities) {
+			switch (act.type) {
+				case 'launch-to-orbit': {
+					// Arc from surface to parking orbit (200 km or target)
+					const parkingAlt = Math.min(200, currentAlt);
+					const parkingR = altToRadius(parkingAlt);
+					// Point on orbit directly above launch site
+					const orbitAbove = latLngToVec3(siteLat, siteLng, parkingR);
+					const peakR = altToRadius(parkingAlt * 0.6); // arc peaks slightly
+					const arcGeo = makeArc(sitePos, orbitAbove, peakR + (parkingR - EARTH_RADIUS) * 0.3, 48);
+					const arcLine = new THREE.Line(arcGeo, dashedLineMat(COL_LAUNCH_ARC, 0.9));
+					arcLine.computeLineDistances();
+					group.add(arcLine);
+					// Launch site dot
+					group.add(makeEventDot(sitePos, COL_LAUNCH_ARC));
+					break;
+				}
+
+				case 'circularize': {
+					// Draw the main orbit ring at current altitude
+					const ringGeo = makeOrbitRing(currentAlt, currentInc, raanDeg);
+					const ringLine = new THREE.Line(ringGeo, dashedLineMat(COL_ORBIT));
+					ringLine.computeLineDistances();
+					group.add(ringLine);
+					orbitIndex++;
+					break;
+				}
+
+				case 'change-orbit': {
+					const prevAlt = currentAlt;
+					const newAlt = act.targetAlt ?? currentAlt;
+					// Transfer arc: pick two points 90° apart on the orbit
+					const theta1 = (orbitIndex * 47) * Math.PI / 180; // slightly different angle per orbit
+					const r1 = altToRadius(prevAlt);
+					const r2 = altToRadius(newAlt);
+					// Use a point on the current orbit and a point on the new orbit
+					const from = latLngToVec3(currentInc * 0.5, raanDeg + 30, r1);
+					const to = latLngToVec3(currentInc * 0.5, raanDeg + 120, r2);
+					const peakR = Math.max(r1, r2) * 1.02;
+					const transferGeo = makeArc(from, to, peakR, 48);
+					const transferLine = new THREE.Line(transferGeo, dashedLineMat(COL_TRANSFER, 0.7));
+					transferLine.computeLineDistances();
+					group.add(transferLine);
+					// Event dot at maneuver
+					group.add(makeEventDot(from, COL_EVENT));
+					// Draw new orbit ring
+					currentAlt = newAlt;
+					const newRingGeo = makeOrbitRing(currentAlt, currentInc, raanDeg);
+					const newRingLine = new THREE.Line(newRingGeo, dashedLineMat(COL_ORBIT, 0.6));
+					newRingLine.computeLineDistances();
+					group.add(newRingLine);
+					orbitIndex++;
+					break;
+				}
+
+				case 'plane-change': {
+					const prevInc = currentInc;
+					const newInc = act.targetInc ?? currentInc;
+					const r = altToRadius(currentAlt);
+					// Dot at maneuver point
+					const maneuverPt = latLngToVec3(prevInc * 0.3, raanDeg + 60, r);
+					group.add(makeEventDot(maneuverPt, COL_EVENT));
+					// Draw new orbit ring with new inclination
+					currentInc = newInc;
+					const incRingGeo = makeOrbitRing(currentAlt, currentInc, raanDeg);
+					const incRingLine = new THREE.Line(incRingGeo, dashedLineMat(COL_ORBIT, 0.6));
+					incRingLine.computeLineDistances();
+					group.add(incRingLine);
+					break;
+				}
+
+				case 'deploy-payload': {
+					// Dot on orbit at a spread-out angle
+					const r = altToRadius(currentAlt);
+					const angle = 45 + orbitIndex * 30; // spread deployments around the ring
+					const deployPt = latLngToVec3(
+						currentInc * 0.4 * Math.sin(angle * Math.PI / 180),
+						raanDeg + angle,
+						r
+					);
+					group.add(makeEventDot(deployPt, COL_DEPLOY));
+					orbitIndex++;
+					break;
+				}
+
+				case 'deorbit': {
+					// Fading arc from orbit down to surface
+					const r = altToRadius(currentAlt);
+					const deorbitStart = latLngToVec3(
+						currentInc * 0.3,
+						raanDeg + 180,
+						r
+					);
+					const landingPt = latLngToVec3(
+						currentInc * 0.2,
+						raanDeg + 220,
+						EARTH_RADIUS * 1.001
+					);
+					const peakR = r * 0.85;
+					const deorbitGeo = makeArc(deorbitStart, landingPt, peakR, 48);
+
+					// Create fading material (lower opacity)
+					const deorbitMat = new THREE.LineDashedMaterial({
+						color: COL_DEORBIT,
+						dashSize: 0.025,
+						gapSize: 0.02,
+						opacity: 0.4,
+						transparent: true,
+					});
+					const deorbitLine = new THREE.Line(deorbitGeo, deorbitMat);
+					deorbitLine.computeLineDistances();
+					group.add(deorbitLine);
+					// Dot at deorbit burn
+					group.add(makeEventDot(deorbitStart, COL_DEORBIT));
+					break;
+				}
+
+				default:
+					// station-keep, rendezvous, dock etc — no extra visuals for now
+					break;
+			}
+		}
+
+		// ── Booster return arc (for reusable modes) ──────
+		if (m.reuseMode === 'booster-reuse' || m.reuseMode === 'full-reuse') {
+			const boostSepAlt = 80; // km roughly where stage sep happens
+			const sepR = altToRadius(boostSepAlt);
+			const sepPt = latLngToVec3(siteLat + 2, siteLng + 5, sepR);
+			const landPt = latLngToVec3(siteLat - 0.5, siteLng + 1, EARTH_RADIUS * 1.001);
+			const boosterArcGeo = makeArc(sepPt, landPt, sepR * 0.8, 48);
+			const boosterMat = solidLineMat(COL_BOOSTER, 0.7);
+			const boosterLine = new THREE.Line(boosterArcGeo, boosterMat);
+			group.add(boosterLine);
+			// Landing dot
+			group.add(makeEventDot(landPt, COL_BOOSTER));
+		}
+	}
+
+	// ── Rebuild all mission visuals ──────────────────────
+	function rebuildMissions(missions: ScheduledMissionMapData[]) {
+		if (!scene || !missionGroup) return;
+		// Clear previous
+		while (missionGroup.children.length > 0) {
+			const child = missionGroup.children[0];
+			missionGroup.remove(child);
+			if (child instanceof THREE.Line) {
+				child.geometry.dispose();
+				if (child.material instanceof THREE.Material) child.material.dispose();
+			}
+			if (child instanceof THREE.Mesh && child.geometry !== dotGeo) {
+				child.geometry.dispose();
+			}
+		}
+
+		if (!showMissions) return;
+
+		for (const m of missions) {
+			buildMissionVisuals(m, missionGroup);
+		}
+	}
+
+	// ── Reactive: rebuild when store changes ─────────────
+	$effect(() => {
+		const missions = $scheduledMissionsStore;
+		const visible = showMissions;
+		rebuildMissions(visible ? missions : []);
+	});
+
+	// ── Subsolar point from game time ────────────────────
+	// Returns [lat, lng] of the point on Earth directly under the Sun.
+	function subsolarPoint(date: Date): [number, number] {
+		const utcH = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+		// Subsolar longitude: sun is at 0° lng at 12:00 UTC
+		const lng = (12 - utcH) * 15; // degrees, range roughly -180..180
+		// Subsolar latitude (solar declination)
+		const dayOfYear = Math.floor((date.getTime() - Date.UTC(date.getUTCFullYear(), 0, 1)) / 86400000) + 1;
+		const lat = 23.44 * Math.sin((2 * Math.PI / 365) * (dayOfYear - 81));
+		return [lat, lng];
+	}
+
+	// ── Reactive: update sun position for day/night ──────
+	$effect(() => {
+		if (!mounted) return; // wait for onMount to assign light refs
+		const dayNight = showDayNight;
+		const hours = $gameTime;
+
+		if (dayNight) {
+			const date = gameTimeToDate(hours);
+			const [sunLat, sunLng] = subsolarPoint(date);
+			const sunDir = latLngToVec3(sunLat, sunLng, 10);
+			sunLight.position.copy(sunDir);
+			sunLight.intensity = 2.5;
+			ambientLight.intensity = 0.12;
+			fillLight.intensity = 0.08;
+			backLight.intensity = 0;
+			topLight.intensity = 0;
+			bottomLight.intensity = 0;
+		} else {
+			// Directional lights from all sides for uniform, textured illumination
+			sunLight.position.set(5, 3, 5);
+			sunLight.intensity = 2.0;
+			ambientLight.intensity = 0.4;
+			fillLight.intensity = 2.0;
+			backLight.intensity = 2.0;
+			topLight.intensity = 1.5;
+			bottomLight.intensity = 1.5;
+		}
+	});
+
 	// ── Main setup ────────────────────────────────────────
 	onMount(() => {
 		const w = container.clientWidth;
@@ -78,6 +518,15 @@
 		scene = new THREE.Scene();
 		scene.background = new THREE.Color('#070b14');
 
+		// Mission group
+		missionGroup = new THREE.Group();
+		scene.add(missionGroup);
+
+		// Launch site markers group
+		siteGroup = new THREE.Group();
+		scene.add(siteGroup);
+		buildSiteMarkers(siteGroup, $claimedComplexes);
+
 		// Camera
 		camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 1000);
 		camera.position.set(0, 0.8, 3.0);
@@ -93,17 +542,28 @@
 		controls.enablePan = false;  // keep Earth centered
 
 		// ── Lighting ──────────────────────────────────────
-		const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
+		sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
 		sunLight.position.set(5, 3, 5);
 		scene.add(sunLight);
 
-		const ambient = new THREE.AmbientLight(0x334466, 0.6);
-		scene.add(ambient);
+		ambientLight = new THREE.AmbientLight(0x334466, 0.6);
+		scene.add(ambientLight);
 
-		// Point hint light on dark side
-		const fillLight = new THREE.DirectionalLight(0x1a2a4a, 0.3);
-		fillLight.position.set(-3, -1, -3);
+		fillLight = new THREE.DirectionalLight(0xffffff, 0);
+		fillLight.position.set(-5, -3, -5);
 		scene.add(fillLight);
+
+		backLight = new THREE.DirectionalLight(0xffffff, 0);
+		backLight.position.set(-5, 3, 5);
+		scene.add(backLight);
+
+		topLight = new THREE.DirectionalLight(0xffffff, 0);
+		topLight.position.set(0, 6, 0);
+		scene.add(topLight);
+
+		bottomLight = new THREE.DirectionalLight(0xffffff, 0);
+		bottomLight.position.set(0, -6, 0);
+		scene.add(bottomLight);
 
 		// ── Earth sphere ──────────────────────────────────
 		const textureLoader = new THREE.TextureLoader();
@@ -118,7 +578,6 @@
 			metalness: 0.05,
 		});
 		earthMesh = new THREE.Mesh(earthGeometry, earthMaterial);
-		// Rotate so prime meridian (0° lng) faces camera at start
 		earthMesh.rotation.y = -Math.PI / 2;
 		scene.add(earthMesh);
 
@@ -170,6 +629,12 @@
 		});
 		scene.add(new THREE.Points(starGeometry, starMaterial));
 
+		// ── Initial mission draw ──────────────────────────
+		rebuildMissions($scheduledMissionsStore);
+
+		// Signal reactive effects that Three.js refs are ready
+		mounted = true;
+
 		// ── Resize handler ────────────────────────────────
 		const observer = new ResizeObserver(entries => {
 			for (const entry of entries) {
@@ -181,6 +646,24 @@
 			}
 		});
 		observer.observe(container);
+
+		// ── Raycaster for click interaction ──────────────
+		const raycaster = new THREE.Raycaster();
+		const mouse = new THREE.Vector2();
+
+		function onCanvasClick(event: MouseEvent) {
+			if (!siteGroup.visible) return;
+			const rect = renderer.domElement.getBoundingClientRect();
+			mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+			mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+			raycaster.setFromCamera(mouse, camera);
+			const hits = raycaster.intersectObjects(siteGroup.children, false);
+			if (hits.length > 0) {
+				const siteName = hits[0].object.userData?.siteName;
+				if (siteName) onSiteClick(siteName);
+			}
+		}
+		renderer.domElement.addEventListener('click', onCanvasClick);
 
 		// ── Render loop ───────────────────────────────────
 		function animate() {
@@ -194,6 +677,7 @@
 		return () => {
 			cancelAnimationFrame(frameId);
 			observer.disconnect();
+			renderer.domElement.removeEventListener('click', onCanvasClick);
 			controls.dispose();
 			renderer.dispose();
 			earthGeometry.dispose();
@@ -214,7 +698,30 @@
 		<button class="preset-btn" class:active={activePreset === 'free'} onclick={() => setPreset('free')}>🌐 Free</button>
 		<button class="preset-btn" class:active={activePreset === 'north'} onclick={() => setPreset('north')}>⬆️ North Pole</button>
 		<button class="preset-btn" class:active={activePreset === 'south'} onclick={() => setPreset('south')}>⬇️ South Pole</button>
+		<span class="controls-spacer"></span>
+		<label class="globe-toggle">
+			<input type="checkbox" bind:checked={showDayNight} />
+			<span>Day / Night</span>
+		</label>
+		<label class="globe-toggle">
+			<input type="checkbox" bind:checked={showLaunchSites} />
+			<span>Launch Sites</span>
+		</label>
+		<label class="globe-toggle">
+			<input type="checkbox" bind:checked={showMissions} />
+			<span>Planned Missions</span>
+		</label>
 	</div>
+	{#if showMissions}
+	<div class="globe-legend">
+		<span class="legend-item"><span class="legend-swatch" style="background: #f97316;"></span> Launch</span>
+		<span class="legend-item"><span class="legend-swatch" style="background: #eab308;"></span> Orbit</span>
+		<span class="legend-item"><span class="legend-swatch" style="background: #38bdf8;"></span> Transfer</span>
+		<span class="legend-item"><span class="legend-swatch" style="background: #a78bfa;"></span> Deploy</span>
+		<span class="legend-item"><span class="legend-swatch" style="background: #ef4444;"></span> Deorbit</span>
+		<span class="legend-item"><span class="legend-swatch" style="background: #22c55e;"></span> Booster Return</span>
+	</div>
+	{/if}
 </div>
 
 <style>
@@ -259,5 +766,39 @@
 		background: rgba(99, 102, 241, 0.12);
 		border-color: rgba(99, 102, 241, 0.3);
 		color: var(--color-text);
+	}
+	.controls-spacer {
+		flex: 1;
+	}
+	.globe-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.65rem;
+		color: var(--color-text-dim);
+		cursor: pointer;
+	}
+	.globe-toggle input {
+		accent-color: #eab308;
+		cursor: pointer;
+	}
+	.globe-legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		margin-top: 0.35rem;
+		font-size: 0.6rem;
+		color: var(--color-text-dim);
+	}
+	.legend-item {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+	.legend-swatch {
+		display: inline-block;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
 	}
 </style>

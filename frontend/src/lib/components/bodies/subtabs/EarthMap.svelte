@@ -4,7 +4,7 @@
 	import type L from 'leaflet';
 	import EarthGlobe from './EarthGlobe.svelte';
 
-	let { mapView = 'equirectangular' }: { mapView?: 'equirectangular' | 'spherical' } = $props();
+	let mapView = $state<'equirectangular' | 'spherical'>('equirectangular');
 
 	type PadRefurb = 'manual' | 'semi-auto' | 'automated';
 
@@ -317,6 +317,14 @@
 		toggleMarkers(showLaunchSites);
 	});
 
+	// Re-validate Leaflet layout when switching back to equirectangular
+	$effect(() => {
+		if (mapView === 'equirectangular' && map) {
+			// Delay so the container is visible before Leaflet measures it
+			setTimeout(() => map.invalidateSize(), 50);
+		}
+	});
+
 	onMount(async () => {
 		leaflet = await import('leaflet');
 		await import('leaflet/dist/leaflet.css');
@@ -391,18 +399,16 @@
 <div class="earth-map-wrapper">
 	<div class="map-header">
 		<h3 class="text-lg font-semibold">Earth Surface Map</h3>
-		<span class="text-xs text-[var(--color-text-dim)]">
-			{complexes.length} launch complexes
-		</span>
+		<div class="projection-selector">
+			<button class="proj-btn" class:active={mapView === 'equirectangular'} onclick={() => mapView = 'equirectangular'}>🗺️ Equirectangular</button>
+			<button class="proj-btn" class:active={mapView === 'spherical'} onclick={() => mapView = 'spherical'}>🌐 Spherical</button>
+		</div>
 	</div>
 
-	{#if mapView === 'equirectangular'}
-	<div class="map-container" bind:this={mapContainer}></div>
-	{:else}
-	<EarthGlobe />
-	{/if}
+	<div class="map-container" bind:this={mapContainer} style:display={mapView === 'equirectangular' ? 'block' : 'none'}></div>
 
-	<!-- Visibility controls -->
+	{#if mapView === 'equirectangular'}
+	<!-- Visibility controls (equirectangular only; EarthGlobe has its own) -->
 	<div class="map-controls mt-2">
 		<label class="map-toggle">
 			<input type="checkbox" bind:checked={showLaunchSites} />
@@ -425,6 +431,9 @@
 		</span>
 		<span class="text-[var(--color-text-dim)]/50 ml-auto">Scroll to zoom · Drag to pan</span>
 	</div>
+	{:else}
+	<EarthGlobe onSiteClick={(name) => openDetails(complexes.find(c => c.name === name)?.id ?? '')} />
+	{/if}
 </div>
 
 {#if detailSite && detailProfile}
@@ -618,7 +627,33 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 1rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.projection-selector {
+		display: flex;
+		gap: 0.25rem;
+		border: 1px solid var(--color-border);
+		border-radius: 0.4rem;
+		padding: 0.15rem;
+		background: var(--color-bg);
+	}
+	.proj-btn {
+		padding: 0.3rem 0.7rem;
+		font-size: 0.68rem;
+		font-weight: 600;
+		border-radius: 0.3rem;
+		border: 1px solid transparent;
+		background: transparent;
+		color: var(--color-text-dim);
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.proj-btn:hover { color: var(--color-text); background: rgba(255,255,255,0.04); }
+	.proj-btn.active {
+		background: rgba(99, 102, 241, 0.12);
+		border-color: rgba(99, 102, 241, 0.3);
+		color: var(--color-text);
 	}
 
 	.map-container {

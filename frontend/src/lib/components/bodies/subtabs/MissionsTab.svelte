@@ -860,6 +860,8 @@
 			apoapsis: m.apoapsis,
 			periapsis: m.periapsis,
 			circular: Math.abs(m.apoapsis - m.periapsis) < 1,
+			activities: m.activities.map(a => ({ type: a.type, notes: a.notes, targetAlt: a.targetAlt, targetInc: a.targetInc, payloadName: a.payloadName })),
+			reuseMode: m.reuseMode,
 		})));
 	});
 

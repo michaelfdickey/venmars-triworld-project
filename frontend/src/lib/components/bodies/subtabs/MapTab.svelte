@@ -4,8 +4,6 @@
 
 	let { bodyId }: { bodyId: string } = $props();
 
-	let earthMapView = $state<'equirectangular' | 'spherical'>('equirectangular');
-
 	const mapConfig: Record<string, { bg: string; label: string; desc: string }> = {
 		earth: { bg: 'from-blue-900/40 to-green-900/40', label: 'Earth Surface Map', desc: 'Launch sites and ground infrastructure' },
 		moon: { bg: 'from-gray-800/40 to-gray-600/40', label: 'Lunar Surface Map', desc: 'Mass driver sites, regolith mining zones, construction platforms' },
@@ -18,11 +16,7 @@
 </script>
 
 {#if bodyId === 'earth'}
-	<div class="earth-map-tabs">
-		<button class="map-tab-btn" class:active={earthMapView === 'equirectangular'} onclick={() => earthMapView = 'equirectangular'}>🗺️ Equirectangular</button>
-		<button class="map-tab-btn" class:active={earthMapView === 'spherical'} onclick={() => earthMapView = 'spherical'}>🌐 Spherical</button>
-	</div>
-	<EarthMap mapView={earthMapView} />
+	<EarthMap />
 {:else if bodyId === 'moon'}
 	<MoonMap />
 {:else}

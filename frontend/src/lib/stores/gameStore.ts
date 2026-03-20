@@ -852,6 +852,14 @@ export const rocketDefs: RocketDef[] = [
 export const rocketInventory = writable<Record<string, number>>({});
 
 // ── Scheduled missions (shared for map visualization) ─────────────
+export interface MissionMapActivity {
+	type: string;
+	notes: string;
+	targetAlt?: number;
+	targetInc?: number;
+	payloadName?: string;
+}
+
 export interface ScheduledMissionMapData {
 	name: string;
 	site: string;        // launch site name
@@ -860,6 +868,8 @@ export interface ScheduledMissionMapData {
 	apoapsis: number;    // km
 	periapsis: number;   // km
 	circular: boolean;
+	activities: MissionMapActivity[];
+	reuseMode: ReuseMode;
 }
 export const scheduledMissionsStore = writable<ScheduledMissionMapData[]>([]);
 

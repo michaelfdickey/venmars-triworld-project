@@ -12,6 +12,15 @@
 			: marketSatellites.filter(p => p.category === selectedCategory)
 	);
 
+	const deployLabels: Record<string, string> = {
+		'spin-stabilized': '🔄 Spin',
+		'propulsive': '🚀 Propulsive',
+		'docking': '🔗 Docking',
+		'electromagnetic': '⚡ EM Rail',
+		'cold-gas': '💨 Cold-Gas',
+		'gravity-release': '⬇️ Gravity',
+	};
+
 	function formatMass(kg: number): string {
 		if (kg >= 1000) return (kg / 1000).toFixed(1) + ' t';
 		return kg.toLocaleString() + ' kg';
@@ -82,6 +91,14 @@
 					<div class="stat">
 						<span class="stat-label">Volume</span>
 						<span class="stat-value">{payload.volume_m3} m³</span>
+					</div>
+					<div class="stat">
+						<span class="stat-label">Max G</span>
+						<span class="stat-value">{payload.maxGs > 0 ? payload.maxGs + ' g' : '—'}</span>
+					</div>
+					<div class="stat">
+						<span class="stat-label">Deploy</span>
+						<span class="stat-value">{deployLabels[payload.deployMethod] ?? payload.deployMethod}</span>
 					</div>
 				</div>
 

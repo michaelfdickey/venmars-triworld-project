@@ -4,6 +4,8 @@
 
 	let { bodyId }: { bodyId: string } = $props();
 
+	let earthMapView = $state<'equirectangular' | 'spherical'>('equirectangular');
+
 	const mapConfig: Record<string, { bg: string; label: string; desc: string }> = {
 		earth: { bg: 'from-blue-900/40 to-green-900/40', label: 'Earth Surface Map', desc: 'Launch sites and ground infrastructure' },
 		moon: { bg: 'from-gray-800/40 to-gray-600/40', label: 'Lunar Surface Map', desc: 'Mass driver sites, regolith mining zones, construction platforms' },
@@ -16,7 +18,11 @@
 </script>
 
 {#if bodyId === 'earth'}
-	<EarthMap />
+	<div class="earth-map-tabs">
+		<button class="map-tab-btn" class:active={earthMapView === 'equirectangular'} onclick={() => earthMapView = 'equirectangular'}>🗺️ Equirectangular</button>
+		<button class="map-tab-btn" class:active={earthMapView === 'spherical'} onclick={() => earthMapView = 'spherical'}>🌐 Spherical</button>
+	</div>
+	<EarthMap mapView={earthMapView} />
 {:else if bodyId === 'moon'}
 	<MoonMap />
 {:else}
@@ -72,3 +78,33 @@
 	</div>
 </div>
 {/if}
+
+<style>
+	.earth-map-tabs {
+		display: flex;
+		gap: 0.25rem;
+		margin-bottom: 0.75rem;
+		padding: 0.2rem;
+		background: var(--color-bg-panel, #111827);
+		border-radius: 0.5rem;
+		border: 1px solid var(--color-border);
+		width: fit-content;
+	}
+	.map-tab-btn {
+		padding: 0.35rem 0.85rem;
+		font-size: 0.72rem;
+		font-weight: 600;
+		border-radius: 0.375rem;
+		border: 1px solid transparent;
+		background: transparent;
+		color: var(--color-text-dim);
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.map-tab-btn:hover { color: var(--color-text); background: rgba(255,255,255,0.04); }
+	.map-tab-btn.active {
+		background: rgba(99, 102, 241, 0.12);
+		border-color: rgba(99, 102, 241, 0.3);
+		color: var(--color-text);
+	}
+</style>

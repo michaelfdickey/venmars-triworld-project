@@ -2,6 +2,9 @@
 	import { onMount } from 'svelte';
 	import { claimedComplexes, launchComplexProfiles, scheduledMissionsStore, type LaunchComplexProfile, type ScheduledMissionMapData } from '$lib/stores/gameStore';
 	import type L from 'leaflet';
+	import EarthGlobe from './EarthGlobe.svelte';
+
+	let { mapView = 'equirectangular' }: { mapView?: 'equirectangular' | 'spherical' } = $props();
 
 	type PadRefurb = 'manual' | 'semi-auto' | 'automated';
 
@@ -393,7 +396,11 @@
 		</span>
 	</div>
 
+	{#if mapView === 'equirectangular'}
 	<div class="map-container" bind:this={mapContainer}></div>
+	{:else}
+	<EarthGlobe />
+	{/if}
 
 	<!-- Visibility controls -->
 	<div class="map-controls mt-2">
@@ -1118,4 +1125,5 @@
 		font-size: 0.65rem !important;
 		padding: 2px 6px !important;
 	}
+
 </style>

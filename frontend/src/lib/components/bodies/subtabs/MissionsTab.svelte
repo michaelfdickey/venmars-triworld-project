@@ -34,6 +34,7 @@
 		volume_m3: number;
 		diameter_m: number;
 		cost: number;
+		deployMethod: DeployMethod;
 	}
 
 	interface FuelOption {
@@ -77,6 +78,7 @@
 		notes: string;
 		targetAlt?: number;  // km — used by change-orbit
 		targetInc?: number;  // deg — used by plane-change
+		payloadName?: string; // which payload — used by deploy-payload
 	}
 
 	// DeployMethod type imported from gameStore
@@ -105,6 +107,7 @@
 		periapsis: number;
 		mode: 'one-off' | 'repeating';
 		date: string;
+		time: string;
 		repeatDays: number;
 		activities: MissionActivity[];
 		launchWindow: LaunchWindow;
@@ -200,6 +203,7 @@
 		volume_m3: d.volume_m3,
 		diameter_m: d.diameter_m,
 		cost: d.cost,
+		deployMethod: d.deployMethod,
 	}));
 
 	// ── Fuel ──────────────────────────────────────────────
@@ -384,8 +388,10 @@
 					return 0; // already in target orbit after launch insertion
 				}
 			case 'deploy-payload': {
-				const dm = deployMethods.find(d => d.id === selectedDeployMethod);
-				return (dm?.deltaVOverhead ?? 5) * Math.max(1, selectedPayloads.length);
+				const pl = payloadOptions.find(p => p.name === act.payloadName);
+				if (!pl) return 5;
+				const dm = deployMethods.find(d => d.id === pl.deployMethod);
+				return dm?.deltaVOverhead ?? 5;
 			}
 			case 'plane-change': {
 				// ΔV for inclination change at current orbit altitude
@@ -461,6 +467,7 @@
 	// Schedule
 	let missionMode = $state<'one-off' | 'repeating'>('one-off');
 	let launchDate = $state('2031-01-15');
+	let launchTime = $state('12:00');
 	let repeatIntervalDays = $state(30);
 	let launchWindow = $state<LaunchWindow>('next-optimal');
 
@@ -468,7 +475,6 @@
 	let missionActivities = $state<MissionActivity[]>([
 		{ type: 'launch-to-orbit', notes: '' },
 		{ type: 'circularize', notes: '' },
-		{ type: 'deploy-payload', notes: '' },
 	]);
 	let selectedDeployMethod = $state<DeployMethod>('spin-stabilized');
 
@@ -494,6 +500,7 @@
 		nextMissionId = _cache.nextMissionId;
 		missionMode = _cache.missionMode;
 		launchDate = _cache.launchDate;
+		launchTime = _cache.launchTime ?? '12:00';
 		repeatIntervalDays = _cache.repeatIntervalDays;
 		launchWindow = _cache.launchWindow;
 		missionActivities = _cache.missionActivities;
@@ -522,6 +529,7 @@
 			nextMissionId,
 			missionMode,
 			launchDate,
+			launchTime,
 			repeatIntervalDays,
 			launchWindow,
 			missionActivities,
@@ -555,6 +563,7 @@
 			periapsis: orbitPeriapsis,
 			mode: missionMode,
 			date: launchDate,
+			time: launchTime,
 			repeatDays: repeatIntervalDays,
 			activities: missionActivities.map(a => ({ ...a })),
 			launchWindow,
@@ -587,6 +596,7 @@
 		orbitPeriapsis = m.periapsis;
 		missionMode = m.mode;
 		launchDate = m.date;
+		launchTime = m.time ?? '12:00';
 		repeatIntervalDays = m.repeatDays;
 		missionActivities = m.activities.map(a => ({ ...a }));
 		launchWindow = m.launchWindow;
@@ -616,11 +626,11 @@
 		orbitPeriapsis = 200;
 		missionMode = 'one-off';
 		launchDate = '2031-01-15';
+		launchTime = '12:00';
 		repeatIntervalDays = 30;
 		missionActivities = [
 			{ type: 'launch-to-orbit', notes: '' },
 			{ type: 'circularize', notes: '' },
-			{ type: 'deploy-payload', notes: '' },
 		];
 		launchWindow = 'next-optimal';
 		selectedDeployMethod = 'spin-stabilized';
@@ -688,6 +698,7 @@
 			periapsis: orbitPeriapsis,
 			mode: missionMode,
 			date: launchDate,
+			time: launchTime,
 			repeatDays: repeatIntervalDays,
 			activities: missionActivities.map(a => ({ ...a })),
 			launchWindow,
@@ -733,6 +744,7 @@
 		orbitPeriapsis = m.periapsis;
 		missionMode = m.mode;
 		launchDate = m.date;
+		launchTime = m.time ?? '12:00';
 		repeatIntervalDays = m.repeatDays;
 		missionActivities = m.activities.map(a => ({ ...a }));
 		launchWindow = m.launchWindow;
@@ -795,8 +807,8 @@
 	}
 
 	// ── Derived: activities ───────────────────────────────
-	function addActivity(type: ActivityType) {
-		missionActivities = [...missionActivities, { type, notes: '' }];
+	function addActivity(type: ActivityType, payloadName?: string) {
+		missionActivities = [...missionActivities, { type, notes: '', ...(payloadName ? { payloadName } : {}) }];
 	}
 
 	function removeActivity(index: number) {
@@ -853,6 +865,29 @@
 
 	let chosenFuel = $derived(fuelOptions.find(f => f.name === selectedFuel));
 	let chosenPayloadItems = $derived(selectedPayloads.map(n => payloadOptions.find(p => p.name === n)).filter(Boolean) as PayloadOption[]);
+
+	// Auto-sync deploy-payload activities when payload selection changes
+	$effect(() => {
+		const payloads = selectedPayloads;
+		const acts = missionActivities;
+		// Current deploy activities mapped by payload name
+		const existingDeploys = acts.filter(a => a.type === 'deploy-payload' && a.payloadName);
+		const existingNames = new Set(existingDeploys.map(a => a.payloadName!));
+		const selectedNames = new Set(payloads);
+
+		// Find payloads that need a new deploy step
+		const toAdd = payloads.filter(n => !existingNames.has(n));
+		// Find deploy steps whose payload was removed
+		const toRemove = new Set([...existingNames].filter(n => !selectedNames.has(n)));
+
+		if (toAdd.length === 0 && toRemove.size === 0) return;
+
+		let updated = acts.filter(a => !(a.type === 'deploy-payload' && a.payloadName && toRemove.has(a.payloadName)));
+		for (const name of toAdd) {
+			updated = [...updated, { type: 'deploy-payload' as ActivityType, notes: '', payloadName: name }];
+		}
+		missionActivities = updated;
+	});
 
 	let totalPayloadMass = $derived(chosenPayloadItems.reduce((s, p) => s + p.mass, 0));
 	let totalPayloadVolume = $derived(chosenPayloadItems.reduce((s, p) => s + p.volume_m3, 0));
@@ -1327,7 +1362,11 @@
 			</div>
 			<div class="param-field">
 				<span class="param-label">{missionMode === 'one-off' ? 'Launch Date' : 'First Launch'}</span>
-				<input class="param-input date-input" type="date" bind:value={launchDate} />
+				<div class="datetime-row">
+					<input class="param-input date-input" type="date" bind:value={launchDate} />
+					<input class="param-input time-input" type="time" bind:value={launchTime} />
+					<span class="param-unit">UTC</span>
+				</div>
 			</div>
 			{#if missionMode === 'repeating'}
 				<div class="param-field">
@@ -1355,31 +1394,9 @@
 		</p>
 	</div>
 
-	<!-- 7. Payload Deployment -->
+	<!-- 7. Mission Activities -->
 	<div class="designer-section mt-3">
-		<h4 class="section-title">7. Payload Deployment Method</h4>
-		<div class="deploy-pills">
-			{#each deployMethods as dm}
-				<button
-					class="deploy-pill"
-					class:active={selectedDeployMethod === dm.id}
-					onclick={() => selectedDeployMethod = dm.id}
-					title={dm.description}
-				>
-					<span class="deploy-icon">{dm.icon}</span>
-					<div class="deploy-info">
-						<span class="deploy-name">{dm.name}</span>
-						<span class="deploy-desc">{dm.description}</span>
-					</div>
-					<span class="deploy-dv">+{dm.deltaVOverhead} m/s/payload</span>
-				</button>
-			{/each}
-		</div>
-	</div>
-
-	<!-- 8. Mission Activities -->
-	<div class="designer-section mt-3">
-		<h4 class="section-title">8. Mission Activities</h4>
+		<h4 class="section-title">7. Mission Activities</h4>
 		<p class="text-xs text-[var(--color-text-dim)] mb-2">Stack activities in order. ΔV costs are computed from your mission parameters.</p>
 
 		<div class="activity-stack">
@@ -1430,6 +1447,11 @@
 							/>
 							<span class="activity-param-unit">deg</span>
 						</div>
+					{:else if act.type === 'deploy-payload'}
+						{@const plOpt = payloadOptions.find(p => p.name === act.payloadName)}
+						{@const plDm = deployMethods.find(d => d.id === plOpt?.deployMethod)}
+						<span class="activity-payload-tag">{plDm?.icon ?? '📦'} {act.payloadName ?? 'Unknown'}</span>
+						<span class="activity-deploy-method">{plDm?.name ?? 'deploy'}</span>
 					{:else}
 						<span class="activity-desc">{def?.description ?? ''}</span>
 					{/if}
@@ -1437,7 +1459,7 @@
 						<span class="activity-dv" class:dv-zero={dv === 0}>
 							{dv > 0 ? `${dv.toFixed(0)}` : '—'}
 						</span>
-						<span class="activity-running" class:dv-over={chosenRocket && runningDv > availableDeltaV}>
+						<span class="activity-dv-total" class:dv-over={chosenRocket && runningDv > availableDeltaV}>
 							Σ {runningDv.toFixed(0)}
 						</span>
 					</div>
@@ -1453,13 +1475,20 @@
 		<!-- Total ΔV -->
 		<div class="dv-total-row">
 			<span class="dv-total-label">Total Mission ΔV</span>
-			<span class="dv-total-value">{totalDeltaV.toFixed(0)} m/s</span>
+			<div class="dv-total-values">
+				<span class="dv-total-value">{totalDeltaV.toFixed(0)} m/s</span>
+				{#if chosenRocket}
+					<span class="dv-margin" class:dv-over={totalDeltaV > availableDeltaV}>
+						{availableDeltaV - totalDeltaV >= 0 ? '+' : ''}{(availableDeltaV - totalDeltaV).toFixed(0)} margin
+					</span>
+				{/if}
+			</div>
 		</div>
 
 		<!-- Add activity -->
 		<div class="add-activity">
 			<span class="add-label">Add:</span>
-			{#each activityDefs as ad}
+			{#each activityDefs.filter(ad => ad.id !== 'deploy-payload') as ad}
 				<button
 					class="add-act-btn"
 					class:disabled={!ad.enabled}
@@ -1472,6 +1501,7 @@
 				</button>
 			{/each}
 		</div>
+		<p class="text-xs text-[var(--color-text-dim)] mt-1">📦 Deploy steps are added automatically when you select payloads. Reorder them to deploy at different orbits.</p>
 	</div>
 
 	<!-- Mission Name & Save/Load -->
@@ -1507,7 +1537,7 @@
 				{#each savedMissions as sm, i}
 					<div class="saved-item" class:active-mission={loadedMissionIndex === i}>
 						<span class="saved-name">{sm.name}</span>
-						<span class="saved-meta">{sm.rocket || '—'} · {sm.payloads.length}P · {sm.date}</span>
+						<span class="saved-meta">{sm.rocket || '—'} · {sm.payloads.length}P · {sm.date} {sm.time ?? ''} UTC</span>
 						<div class="saved-actions">
 							<button class="act-btn" onclick={() => loadMission(i)} title="Load">📂</button>
 							<button class="act-btn act-remove" onclick={() => deleteMission(i)} title="Delete">✕</button>
@@ -1625,7 +1655,7 @@
 						<span class="td td-name">{sm.name}</span>
 						<span class="td td-vehicle">{sm.rocket || '—'}</span>
 						<span class="td td-dest">{destInfo?.icon ?? ''} {orbitInfo?.name?.split('(')[0]?.trim() ?? sm.orbitId}</span>
-						<span class="td td-date">{sm.date}</span>
+						<span class="td td-date">{sm.date} {sm.time ?? ''}</span>
 						<span class="td td-dv">{sm.totalDeltaV.toFixed(0)} m/s</span>
 						<span class="td td-cost">${sm.totalCost.toLocaleString()}M</span>
 						<span class="td td-status">
@@ -1670,7 +1700,7 @@
 						<span class="td td-name">{cm.name}</span>
 						<span class="td td-vehicle">{cm.rocket || '—'}</span>
 						<span class="td td-dest">{destInfo?.icon ?? ''} {orbitInfo?.name?.split('(')[0]?.trim() ?? cm.orbitId}</span>
-						<span class="td td-date">{cm.date}</span>
+						<span class="td td-date">{cm.date} {cm.time ?? ''}</span>
 						<span class="td td-dv">{cm.totalDeltaV.toFixed(0)} m/s</span>
 						<span class="td td-cost">${cm.totalCost.toLocaleString()}M</span>
 						<span class="td td-status">
@@ -1936,6 +1966,8 @@
 		font-family: 'JetBrains Mono', monospace;
 	}
 	.date-input { width: 10rem; }
+	.time-input { width: 6.5rem; }
+	.datetime-row { display: flex; align-items: center; gap: 0.35rem; }
 
 	.orbit-info-row {
 		margin-top: 0.4rem;
@@ -1997,6 +2029,18 @@
 	}
 	.activity-icon { font-size: 0.85rem; }
 	.activity-name { font-weight: 600; }
+	.activity-payload-tag {
+		font-size: 0.62rem; font-weight: 500;
+		padding: 0.1rem 0.4rem;
+		border-radius: 0.25rem;
+		background: rgba(99, 102, 241, 0.08);
+		border: 1px solid rgba(99, 102, 241, 0.18);
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		max-width: 14rem; flex-shrink: 1; min-width: 0;
+	}
+	.activity-deploy-method {
+		font-size: 0.52rem; color: var(--color-text-dim); white-space: nowrap; flex-shrink: 0;
+	}
 	.activity-desc { flex: 1; color: var(--color-text-dim); font-size: 0.6rem; }
 
 	.activity-param {
@@ -2032,6 +2076,7 @@
 		font-family: 'JetBrains Mono', monospace;
 	}
 	.activity-actions { display: flex; gap: 0.2rem; flex-shrink: 0; }
+
 	.act-btn {
 		padding: 0.15rem 0.3rem;
 		border-radius: 0.2rem;
@@ -2168,37 +2213,6 @@
 	}
 	.btn-new:hover { border-color: var(--color-text-dim); color: var(--color-text); }
 
-	/* Deploy method */
-	.deploy-pills {
-		display: flex; flex-direction: column; gap: 0.3rem;
-	}
-	.deploy-pill {
-		display: flex; align-items: center; gap: 0.5rem;
-		padding: 0.4rem 0.6rem;
-		border-radius: 0.375rem;
-		border: 1px solid var(--color-border);
-		background: var(--color-bg);
-		color: var(--color-text);
-		font-size: 0.68rem;
-		cursor: pointer;
-		text-align: left;
-		transition: all 0.12s;
-	}
-	.deploy-pill:hover { border-color: var(--color-text-dim); }
-	.deploy-pill.active {
-		background: rgba(99, 102, 241, 0.1);
-		border-color: rgba(99, 102, 241, 0.4);
-	}
-	.deploy-icon { font-size: 0.9rem; flex-shrink: 0; }
-	.deploy-info { display: flex; flex-direction: column; flex: 1; }
-	.deploy-name { font-weight: 600; font-size: 0.68rem; }
-	.deploy-desc { font-size: 0.55rem; color: var(--color-text-dim); }
-	.deploy-dv {
-		font-family: 'JetBrains Mono', monospace;
-		font-size: 0.58rem; font-weight: 600;
-		color: #f59e0b; white-space: nowrap; flex-shrink: 0;
-	}
-
 	/* Activity ΔV badge */
 	.activity-dv {
 		font-family: 'JetBrains Mono', monospace;
@@ -2213,17 +2227,23 @@
 	}
 	.activity-dv.dv-zero { color: var(--color-text-dim); background: transparent; border-color: transparent; }
 
-	/* ΔV group: step cost + running total */
+	/* ΔV group: step cost + running total side by side */
 	.activity-dv-group {
-		display: flex; flex-direction: column; align-items: flex-end; gap: 0.1rem;
+		display: flex; align-items: center; gap: 0.35rem;
 		flex-shrink: 0; margin-left: auto;
 	}
-	.activity-running {
+	.activity-dv-total {
 		font-family: 'JetBrains Mono', monospace;
-		font-size: 0.5rem; font-weight: 600;
-		color: var(--color-text-dim);
+		font-size: 0.58rem; font-weight: 700;
+		color: #818cf8;
+		background: rgba(99, 102, 241, 0.08);
+		padding: 0.1rem 0.35rem;
+		border-radius: 0.25rem;
+		border: 1px solid rgba(99, 102, 241, 0.18);
+		min-width: 3.5rem; text-align: center;
+		flex-shrink: 0;
 	}
-	.activity-running.dv-over { color: #ef4444; }
+	.activity-dv-total.dv-over { color: #ef4444; background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.25); }
 
 	/* ΔV total row */
 	.dv-total-row {
@@ -2244,6 +2264,13 @@
 		font-size: 0.8rem; font-weight: 700;
 		color: #f59e0b;
 	}
+	.dv-total-values { display: flex; align-items: center; gap: 0.5rem; }
+	.dv-margin {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.6rem; font-weight: 600;
+		color: #4ade80;
+	}
+	.dv-margin.dv-over { color: #ef4444; }
 	.dv-highlight { color: #f59e0b; }
 
 	/* Mission name */

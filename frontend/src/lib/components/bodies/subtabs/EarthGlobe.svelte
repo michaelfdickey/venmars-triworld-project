@@ -182,6 +182,86 @@
 		return geo;
 	}
 
+	// ── Point on orbital ring at argument of latitude u ──
+	function orbitPointVec3(u: number, r: number, incRad: number, raanRad: number): THREE.Vector3 {
+		const px = r * Math.cos(u);
+		const pz = r * Math.sin(u);
+		const rx = px;
+		const ry = -pz * Math.sin(incRad);
+		const rz = pz * Math.cos(incRad);
+		return new THREE.Vector3(
+			rx * Math.cos(raanRad) + rz * Math.sin(raanRad),
+			ry,
+			-rx * Math.sin(raanRad) + rz * Math.cos(raanRad)
+		);
+	}
+
+	// ── Two-segment ascent arc ───────────────────────────
+	// Seg 1: Short vertical rise from the surface
+	// Seg 2: Pitchover arc to the nearest prograde orbit point
+	//
+	// "Prograde" = ascending half of orbit (u ∈ [0, π]).
+	// On this branch the orbit moves eastward, so searching only
+	// u = 0..180° guarantees prograde and picks the closest point.
+	function makeAscentArc(
+		siteLat: number, siteLng: number,
+		targetAltKm: number, incDeg: number, raanDeg: number,
+	): { vertGeo: THREE.BufferGeometry; pitchGeo: THREE.BufferGeometry; insertPos: THREE.Vector3 } {
+		// Use exactly the same inc/raan as makeOrbitRing so the insertion lands on the ring
+		const inc = incDeg * Math.PI / 180;
+		const raanRad = (raanDeg + 90) * Math.PI / 180;
+		const rOrbit = altToRadius(targetAltKm);
+		const rSurface = EARTH_RADIUS * 1.001;
+
+		// Vertical phase
+		const vertAltKm = Math.min(100, targetAltKm * 0.15);
+		const rVert = altToRadius(vertAltKm);
+		const siteDir = latLngToVec3(siteLat, siteLng, 1).normalize();
+
+		// Segment 1: straight radial line from surface to vertTop
+		const vertSegs = 16;
+		const vertPositions = new Float32Array((vertSegs + 1) * 3);
+		for (let i = 0; i <= vertSegs; i++) {
+			const t = i / vertSegs;
+			const r = rSurface + (rVert - rSurface) * t;
+			vertPositions[i * 3]     = siteDir.x * r;
+			vertPositions[i * 3 + 1] = siteDir.y * r;
+			vertPositions[i * 3 + 2] = siteDir.z * r;
+		}
+		const vertGeo = new THREE.BufferGeometry();
+		vertGeo.setAttribute('position', new THREE.BufferAttribute(vertPositions, 3));
+
+		// Find the nearest point on the ASCENDING half of the orbit ring (u ∈ [0°, 180°]).
+		// The ascending half is the eastward-moving (prograde) branch.
+		let bestU = 0, bestDist = Infinity;
+		for (let deg = 0; deg < 180; deg += 0.5) {
+			const u = deg * Math.PI / 180;
+			const d = orbitPointVec3(u, 1, inc, raanRad).distanceTo(siteDir);
+			if (d < bestDist) { bestDist = d; bestU = u; }
+		}
+		// Nudge 3° downrange (prograde) so insertion isn't directly overhead
+		bestU += 3 * Math.PI / 180;
+
+		const insertPos = orbitPointVec3(bestU, rOrbit, inc, raanRad);
+		const insertDir = insertPos.clone().normalize();
+
+		// Segment 2: pitchover arc from vertTop to insertPos
+		const pitchSegs = 64;
+		const pitchPositions = new Float32Array((pitchSegs + 1) * 3);
+		for (let i = 0; i <= pitchSegs; i++) {
+			const t = i / pitchSegs;
+			const dir = new THREE.Vector3().lerpVectors(siteDir, insertDir, t).normalize();
+			const r = rVert + (rOrbit - rVert) * t;
+			pitchPositions[i * 3]     = dir.x * r;
+			pitchPositions[i * 3 + 1] = dir.y * r;
+			pitchPositions[i * 3 + 2] = dir.z * r;
+		}
+		const pitchGeo = new THREE.BufferGeometry();
+		pitchGeo.setAttribute('position', new THREE.BufferAttribute(pitchPositions, 3));
+
+		return { vertGeo, pitchGeo, insertPos };
+	}
+
 	// ── Curved arc between two 3D points ─────────────────
 	function makeArc(
 		from: THREE.Vector3,
@@ -322,15 +402,18 @@
 		for (const act of m.activities) {
 			switch (act.type) {
 				case 'launch-to-orbit': {
-					const parkingAlt = Math.min(200, currentAlt);
-					const parkingR = altToRadius(parkingAlt);
-					const orbitAbove = latLngToVec3(siteLat, siteLng, parkingR);
-					const peakR = altToRadius(parkingAlt * 0.6);
-					const arcGeo = makeArc(sitePos, orbitAbove, peakR + (parkingR - EARTH_RADIUS) * 0.3, 48);
-					const arcLine = new THREE.Line(arcGeo, dashedLineMat(COL_LAUNCH_ARC, 0.9));
-					arcLine.computeLineDistances();
-					group.add(arcLine);
-					group.add(makeEventDot(sitePos, COL_LAUNCH_ARC));
+					const { vertGeo, pitchGeo, insertPos } = makeAscentArc(siteLat, siteLng, currentAlt, currentInc, raanDeg);
+					// Vertical segment
+					const vertLine = new THREE.Line(vertGeo, dashedLineMat(COL_ORBIT, 0.9));
+					vertLine.computeLineDistances();
+					group.add(vertLine);
+					// Pitchover segment
+					const pitchLine = new THREE.Line(pitchGeo, dashedLineMat(COL_ORBIT, 0.9));
+					pitchLine.computeLineDistances();
+					group.add(pitchLine);
+					// Dots at launch site and orbit insertion
+					group.add(makeEventDot(sitePos, COL_ORBIT));
+					group.add(makeEventDot(insertPos, COL_ORBIT));
 					break;
 				}
 

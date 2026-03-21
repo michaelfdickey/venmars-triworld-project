@@ -54,12 +54,26 @@
 		return launchComplexCosts[complexId]?.name ?? complexId;
 	}
 
-	let sortKey = $state<'payloadLEO' | 'costPerLaunch' | 'name'>('payloadLEO');
+	let sortKey = $state<'payloadLEO' | 'purchaseCostM' | 'name'>('payloadLEO');
+	let sortAsc = $state(false); // false = descending for payload (heaviest first)
+
+	function handleSort(key: typeof sortKey) {
+		if (sortKey === key) {
+			sortAsc = !sortAsc;
+		} else {
+			sortKey = key;
+			// sensible defaults: payload desc, cost asc, name asc
+			sortAsc = key !== 'payloadLEO';
+		}
+	}
+
 	let sortedRockets = $derived(
 		[...rocketDefs].sort((a, b) => {
-			if (sortKey === 'name') return a.name.localeCompare(b.name);
-			if (sortKey === 'costPerLaunch') return a.costPerLaunch - b.costPerLaunch;
-			return b.payloadLEO - a.payloadLEO;
+			let cmp = 0;
+			if (sortKey === 'name') cmp = a.name.localeCompare(b.name);
+			else if (sortKey === 'purchaseCostM') cmp = a.purchaseCostM - b.purchaseCostM;
+			else cmp = a.payloadLEO - b.payloadLEO;
+			return sortAsc ? cmp : -cmp;
 		})
 	);
 
@@ -119,9 +133,15 @@
 		</div>
 		<div class="sort-controls">
 			<span class="sort-label">Sort:</span>
-			<button class="sort-btn" class:active={sortKey === 'payloadLEO'} onclick={() => sortKey = 'payloadLEO'}>Payload</button>
-			<button class="sort-btn" class:active={sortKey === 'costPerLaunch'} onclick={() => sortKey = 'costPerLaunch'}>Cost</button>
-			<button class="sort-btn" class:active={sortKey === 'name'} onclick={() => sortKey = 'name'}>Name</button>
+			<button class="sort-btn" class:active={sortKey === 'payloadLEO'} onclick={() => handleSort('payloadLEO')}>
+				Payload{#if sortKey === 'payloadLEO'}<span class="sort-arrow">{sortAsc ? '▲' : '▼'}</span>{/if}
+			</button>
+			<button class="sort-btn" class:active={sortKey === 'purchaseCostM'} onclick={() => handleSort('purchaseCostM')}>
+				Cost{#if sortKey === 'purchaseCostM'}<span class="sort-arrow">{sortAsc ? '▲' : '▼'}</span>{/if}
+			</button>
+			<button class="sort-btn" class:active={sortKey === 'name'} onclick={() => handleSort('name')}>
+				Name{#if sortKey === 'name'}<span class="sort-arrow">{sortAsc ? '▲' : '▼'}</span>{/if}
+			</button>
 		</div>
 	</div>
 
@@ -504,6 +524,11 @@
 	.sort-btn.active {
 		background: var(--color-border);
 		color: var(--color-text);
+	}
+	.sort-arrow {
+		font-size: 0.65em;
+		margin-left: 0.25rem;
+		opacity: 0.8;
 	}
 
 	.rocket-list {

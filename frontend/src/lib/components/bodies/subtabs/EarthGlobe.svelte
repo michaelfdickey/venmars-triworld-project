@@ -231,10 +231,11 @@
 		const vertGeo = new THREE.BufferGeometry();
 		vertGeo.setAttribute('position', new THREE.BufferAttribute(vertPositions, 3));
 
-		// Find the nearest point on the ASCENDING half of the orbit ring (u ∈ [0°, 180°]).
-		// The ascending half is the eastward-moving (prograde) branch.
+		// Find the nearest point on the NORTHERN half of the orbit ring (u ∈ [180°, 360°]).
+		// In our rotation convention, u=180..360 is the northern (prograde/eastward) branch.
+		// u=270° is the orbit peak (northernmost point), placed over the launch site by RAAN.
 		let bestU = 0, bestDist = Infinity;
-		for (let deg = 0; deg < 180; deg += 0.5) {
+		for (let deg = 180; deg < 360; deg += 0.5) {
 			const u = deg * Math.PI / 180;
 			const d = orbitPointVec3(u, 1, inc, raanRad).distanceTo(siteDir);
 			if (d < bestDist) { bestDist = d; bestU = u; }
@@ -382,7 +383,10 @@
 		const siteLoc = resolveSite(m.site);
 		const siteLat = siteLoc ? siteLoc[0] : 0;
 		const siteLng = siteLoc ? siteLoc[1] : 0;
-		const raanDeg = siteLng;
+		// Place orbit peak (northernmost point) over the launch site.
+		// The orbit peak is at u=270° in our rotation convention.
+		// With RAAN = siteLng + 90, that peak maps to [inc°N, siteLng].
+		const raanDeg = siteLng + 90;
 
 		// Always draw the target orbit ring
 		const ringGeo = makeOrbitRing(m.altitude, m.inclination, raanDeg);

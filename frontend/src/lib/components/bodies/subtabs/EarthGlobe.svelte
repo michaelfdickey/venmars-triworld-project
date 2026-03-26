@@ -137,130 +137,198 @@
 		return EARTH_RADIUS * (1 + altKm / EARTH_RADIUS_KM);
 	}
 
-	// ── Orbit ring geometry ──────────────────────────────
+	// ══════════════════════════════════════════════════════
+	//  ORBIT SYSTEM — plane-normal based, per spec §1–§8
+	// ══════════════════════════════════════════════════════
+
+	// ── §2: Orbit plane normal from inclination + RAAN ───
+	// Convention: RAAN (Ω) measured from the mesh +X axis.
+	// Since mesh is rotated Y = -π/2, the +X axis in mesh-space
+	// corresponds to 90°E longitude. We compensate by adding +90°
+	// to the site longitude when computing Ω, same as latLngToVec3.
+	function orbitNormal(incDeg: number, raanDeg: number): THREE.Vector3 {
+		const i = incDeg * Math.PI / 180;
+		const o = raanDeg * Math.PI / 180;
+		return new THREE.Vector3(
+			Math.sin(o) * Math.sin(i),
+			Math.cos(i),
+			-Math.cos(o) * Math.sin(i)
+		).normalize();
+	}
+
+	// ── §3: Build orbit ring from plane normal ───────────
 	function makeOrbitRing(
 		altKm: number,
 		incDeg: number,
-		raanDeg: number,  // right ascension of ascending node (use launch site lng)
+		raanDeg: number,
 		segments: number = 256,
 	): THREE.BufferGeometry {
 		const r = altToRadius(altKm);
-		const inc = incDeg * Math.PI / 180;
-		const raan = (raanDeg + 90) * Math.PI / 180; // compensate for Earth mesh rotation
+		const nHat = orbitNormal(incDeg, raanDeg);
+
+		// Build orthonormal basis {u, v} in the orbit plane
+		const worldUp = new THREE.Vector3(0, 1, 0);
+		const helper = Math.abs(nHat.dot(worldUp)) < 0.95
+			? worldUp
+			: new THREE.Vector3(1, 0, 0);
+		const uBasis = new THREE.Vector3().crossVectors(helper, nHat).normalize();
+		const vBasis = new THREE.Vector3().crossVectors(nHat, uBasis).normalize();
 
 		const positions = new Float32Array((segments + 1) * 3);
-		for (let i = 0; i <= segments; i++) {
-			const u = (i / segments) * Math.PI * 2; // argument of latitude
-			// Position in orbital plane (x = along orbit, y = 0, z = out of plane)
-			const xOrb = r * Math.cos(u);
-			const zOrb = r * Math.sin(u);
-			// Rotate by inclination around x-axis, then by RAAN around y-axis
-			const x = xOrb * Math.cos(raan) - zOrb * Math.sin(inc) * Math.sin(raan);
-			const y = zOrb * Math.sin(inc) * Math.cos(0) + zOrb * Math.cos(inc) * 0 ;
-			// Full rotation: orbital plane → 3D
-			// In orbital plane: p = (cos(u), 0, sin(u)) * r
-			// Rotate by inc around X: (cos(u), -sin(u)*sin(inc), sin(u)*cos(inc)) * r  -- wait, that's not right
-			// Let me use proper rotation matrices
-			const px = r * Math.cos(u);
-			const py = 0;
-			const pz = r * Math.sin(u);
-			// Rotate by inclination around X-axis
-			const rx = px;
-			const ry = py * Math.cos(inc) - pz * Math.sin(inc);
-			const rz = py * Math.sin(inc) + pz * Math.cos(inc);
-			// Rotate by RAAN around Y-axis
-			const fx = rx * Math.cos(raan) + rz * Math.sin(raan);
-			const fy = ry;
-			const fz = -rx * Math.sin(raan) + rz * Math.cos(raan);
-
-			positions[i * 3]     = fx;
-			positions[i * 3 + 1] = fy;
-			positions[i * 3 + 2] = fz;
+		for (let idx = 0; idx <= segments; idx++) {
+			const t = (idx / segments) * Math.PI * 2;
+			const x = r * (Math.cos(t) * uBasis.x + Math.sin(t) * vBasis.x);
+			const y = r * (Math.cos(t) * uBasis.y + Math.sin(t) * vBasis.y);
+			const z = r * (Math.cos(t) * uBasis.z + Math.sin(t) * vBasis.z);
+			positions[idx * 3]     = x;
+			positions[idx * 3 + 1] = y;
+			positions[idx * 3 + 2] = z;
 		}
 		const geo = new THREE.BufferGeometry();
 		geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 		return geo;
 	}
 
-	// ── Point on orbital ring at argument of latitude u ──
-	function orbitPointVec3(u: number, r: number, incRad: number, raanRad: number): THREE.Vector3 {
-		const px = r * Math.cos(u);
-		const pz = r * Math.sin(u);
-		const rx = px;
-		const ry = -pz * Math.sin(incRad);
-		const rz = pz * Math.cos(incRad);
-		return new THREE.Vector3(
-			rx * Math.cos(raanRad) + rz * Math.sin(raanRad),
-			ry,
-			-rx * Math.sin(raanRad) + rz * Math.cos(raanRad)
-		);
+	// ── §4: Prograde tangent at any point on the orbit ───
+	function progradeAt(rHat: THREE.Vector3, nHat: THREE.Vector3): THREE.Vector3 {
+		return new THREE.Vector3().crossVectors(nHat, rHat).normalize();
 	}
 
-	// ── Two-segment ascent arc ───────────────────────────
-	// Seg 1: Short vertical rise from the surface
-	// Seg 2: Pitchover arc to the nearest prograde orbit point
+	// ── Compute RAAN to align orbit with launch site ─────
+	// In our coordinate system (traced from latLngToVec3 + orbitNormal):
+	//   peak longitude = -raanDeg
+	//   ascending node longitude = -raanDeg - 90°
 	//
-	// "Prograde" = ascending half of orbit (u ∈ [0, π]).
-	// On this branch the orbit moves eastward, so searching only
-	// u = 0..180° guarantees prograde and picks the closest point.
+	// For inc ≤ |lat|: place orbit peak at site longitude
+	//   → raanDeg = -siteLng
+	// For inc > |lat|: place ascending slope over site
+	//   Orbit crosses siteLat at argument u = arcsin(sin(lat)/sin(inc))
+	//   Longitude offset from ascending node: Δlng = atan2(sin(u)*cos(i), cos(u))
+	//   → ascending node at siteLng - Δlng
+	//   → raanDeg = -(siteLng - Δlng) - 90
+	// Both cases unify: when inc=lat, u=90°, Δlng=90°, raanDeg = -siteLng. ✓
+	function computeRaan(siteLat: number, siteLng: number, incDeg: number): number {
+		const inc = Math.max(0.1, incDeg) * Math.PI / 180;
+		const lat = Math.abs(siteLat) * Math.PI / 180;
+		const sinRatio = Math.min(1, Math.sin(lat) / Math.sin(inc));
+		const uCross = Math.asin(sinRatio);
+		const dLng = Math.atan2(Math.sin(uCross) * Math.cos(inc), Math.cos(uCross)) * 180 / Math.PI;
+		return -siteLng + dLng - 90;
+	}
+
+	// ── Find orbit insertion point at 90° east of launch site ─
+	// Scans the orbit ring for the point whose geographic longitude
+	// is closest to siteLng + 90°, on the same hemisphere as the site.
+	function computeAnchor(
+		siteLat: number, siteLng: number,
+		incDeg: number, raanDeg: number, rOrbit: number,
+	): { anchorPos: THREE.Vector3; anchorTangent: THREE.Vector3 } {
+		const nHat = orbitNormal(incDeg, raanDeg);
+
+		// Build same ring basis as makeOrbitRing
+		const worldUp = new THREE.Vector3(0, 1, 0);
+		const helper = Math.abs(nHat.dot(worldUp)) < 0.95 ? worldUp : new THREE.Vector3(1, 0, 0);
+		const uBasis = new THREE.Vector3().crossVectors(helper, nHat).normalize();
+		const vBasis = new THREE.Vector3().crossVectors(nHat, uBasis).normalize();
+
+		// Target longitude: 90° east of site
+		const targetRef = latLngToVec3(0, siteLng + 90, 1);
+		const targetXZ = new THREE.Vector2(targetRef.x, targetRef.z).normalize();
+		const wantNorth = siteLat >= 0;
+
+		// Scan orbit ring for the point at the target longitude on the correct hemisphere
+		let bestT = 0, bestDist = Infinity;
+		const bestPt = new THREE.Vector3();
+		for (let deg = 0; deg < 360; deg += 0.5) {
+			const t = deg * Math.PI / 180;
+			const pt = new THREE.Vector3(
+				Math.cos(t) * uBasis.x + Math.sin(t) * vBasis.x,
+				Math.cos(t) * uBasis.y + Math.sin(t) * vBasis.y,
+				Math.cos(t) * uBasis.z + Math.sin(t) * vBasis.z,
+			);
+			const ptXZ = new THREE.Vector2(pt.x, pt.z);
+			if (ptXZ.length() < 0.01) continue;
+			ptXZ.normalize();
+			const dist = ptXZ.distanceTo(targetXZ);
+			// Prefer same hemisphere as launch site
+			const sameHemi = wantNorth ? pt.y >= -0.01 : pt.y <= 0.01;
+			if (dist < bestDist && sameHemi) {
+				bestDist = dist;
+				bestT = t;
+				bestPt.copy(pt);
+			}
+		}
+
+		const anchorHat = bestPt.normalize();
+		const tangent = progradeAt(anchorHat, nHat);
+
+		return {
+			anchorPos: anchorHat.clone().multiplyScalar(rOrbit),
+			anchorTangent: tangent,
+		};
+	}
+
+	// ── Cubic Bezier ascent arc ──────────────────────
 	function makeAscentArc(
 		siteLat: number, siteLng: number,
 		targetAltKm: number, incDeg: number, raanDeg: number,
-	): { vertGeo: THREE.BufferGeometry; pitchGeo: THREE.BufferGeometry; insertPos: THREE.Vector3 } {
-		// Use exactly the same inc/raan as makeOrbitRing so the insertion lands on the ring
-		const inc = incDeg * Math.PI / 180;
-		const raanRad = (raanDeg + 90) * Math.PI / 180;
+		segments: number = 80,
+	): { geo: THREE.BufferGeometry; insertPos: THREE.Vector3 } {
 		const rOrbit = altToRadius(targetAltKm);
 		const rSurface = EARTH_RADIUS * 1.001;
 
-		// Vertical phase
-		const vertAltKm = Math.min(100, targetAltKm * 0.15);
-		const rVert = altToRadius(vertAltKm);
-		const siteDir = latLngToVec3(siteLat, siteLng, 1).normalize();
+		const sHat = latLngToVec3(siteLat, siteLng, 1).normalize();
+		const P0 = sHat.clone().multiplyScalar(rSurface);
+		const { anchorPos: P3, anchorTangent: joinTangent } = computeAnchor(siteLat, siteLng, incDeg, raanDeg, rOrbit);
 
-		// Segment 1: straight radial line from surface to vertTop
-		const vertSegs = 16;
-		const vertPositions = new Float32Array((vertSegs + 1) * 3);
-		for (let i = 0; i <= vertSegs; i++) {
-			const t = i / vertSegs;
-			const r = rSurface + (rVert - rSurface) * t;
-			vertPositions[i * 3]     = siteDir.x * r;
-			vertPositions[i * 3 + 1] = siteDir.y * r;
-			vertPositions[i * 3 + 2] = siteDir.z * r;
+		// Local launch frame
+		const worldUp = new THREE.Vector3(0, 1, 0);
+		const up0 = sHat.clone();
+		const east0 = new THREE.Vector3().crossVectors(worldUp, sHat).normalize();
+		const north0 = new THREE.Vector3().crossVectors(sHat, east0).normalize();
+
+		// Launch azimuth: sin(az) = cos(inc)/cos(lat)
+		const incRad = Math.max(Math.abs(siteLat), incDeg) * Math.PI / 180;
+		const latRad = Math.abs(siteLat) * Math.PI / 180;
+		const cosRatio = Math.min(1, Math.cos(incRad) / Math.max(0.01, Math.cos(latRad)));
+		const azFromNorth = Math.asin(cosRatio);
+		const heading = north0.clone().multiplyScalar(Math.cos(azFromNorth))
+			.addScaledVector(east0, Math.sin(azFromNorth)).normalize();
+
+		// Launch tangent: 60% up + 40% along azimuth heading
+		const launchTangent = up0.clone().multiplyScalar(0.6)
+			.addScaledVector(heading, 0.4).normalize();
+
+		const distScale = P3.clone().sub(P0).length();
+		const c1 = 0.3;
+		const c2 = 0.4;
+
+		const P1 = P0.clone().addScaledVector(launchTangent, distScale * c1);
+		const P2 = P3.clone().addScaledVector(joinTangent, -distScale * c2);
+
+		// §8: Sample cubic Bezier with monotonic altitude enforcement
+		const positions = new Float32Array((segments + 1) * 3);
+		let prevR = rSurface;
+		for (let idx = 0; idx <= segments; idx++) {
+			const t = idx / segments;
+			const mt = 1 - t;
+			// B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
+			const x = mt*mt*mt*P0.x + 3*mt*mt*t*P1.x + 3*mt*t*t*P2.x + t*t*t*P3.x;
+			const y = mt*mt*mt*P0.y + 3*mt*mt*t*P1.y + 3*mt*t*t*P2.y + t*t*t*P3.y;
+			const z = mt*mt*mt*P0.z + 3*mt*mt*t*P1.z + 3*mt*t*t*P2.z + t*t*t*P3.z;
+			// Enforce minimum radius (§8)
+			let r = Math.sqrt(x*x + y*y + z*z);
+			if (r < prevR) r = prevR;
+			prevR = r;
+			const scale = r / Math.sqrt(x*x + y*y + z*z);
+			positions[idx * 3]     = x * scale;
+			positions[idx * 3 + 1] = y * scale;
+			positions[idx * 3 + 2] = z * scale;
 		}
-		const vertGeo = new THREE.BufferGeometry();
-		vertGeo.setAttribute('position', new THREE.BufferAttribute(vertPositions, 3));
 
-		// Find the nearest point on the NORTHERN half of the orbit ring (u ∈ [180°, 360°]).
-		// In our rotation convention, u=180..360 is the northern (prograde/eastward) branch.
-		// u=270° is the orbit peak (northernmost point), placed over the launch site by RAAN.
-		let bestU = 0, bestDist = Infinity;
-		for (let deg = 180; deg < 360; deg += 0.5) {
-			const u = deg * Math.PI / 180;
-			const d = orbitPointVec3(u, 1, inc, raanRad).distanceTo(siteDir);
-			if (d < bestDist) { bestDist = d; bestU = u; }
-		}
-		// Nudge 3° downrange (prograde) so insertion isn't directly overhead
-		bestU += 3 * Math.PI / 180;
-
-		const insertPos = orbitPointVec3(bestU, rOrbit, inc, raanRad);
-		const insertDir = insertPos.clone().normalize();
-
-		// Segment 2: pitchover arc from vertTop to insertPos
-		const pitchSegs = 64;
-		const pitchPositions = new Float32Array((pitchSegs + 1) * 3);
-		for (let i = 0; i <= pitchSegs; i++) {
-			const t = i / pitchSegs;
-			const dir = new THREE.Vector3().lerpVectors(siteDir, insertDir, t).normalize();
-			const r = rVert + (rOrbit - rVert) * t;
-			pitchPositions[i * 3]     = dir.x * r;
-			pitchPositions[i * 3 + 1] = dir.y * r;
-			pitchPositions[i * 3 + 2] = dir.z * r;
-		}
-		const pitchGeo = new THREE.BufferGeometry();
-		pitchGeo.setAttribute('position', new THREE.BufferAttribute(pitchPositions, 3));
-
-		return { vertGeo, pitchGeo, insertPos };
+		const geo = new THREE.BufferGeometry();
+		geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+		return { geo, insertPos: P3 };
 	}
 
 	// ── Curved arc between two 3D points ─────────────────
@@ -383,10 +451,8 @@
 		const siteLoc = resolveSite(m.site);
 		const siteLat = siteLoc ? siteLoc[0] : 0;
 		const siteLng = siteLoc ? siteLoc[1] : 0;
-		// Place orbit peak (northernmost point) over the launch site.
-		// The orbit peak is at u=270° in our rotation convention.
-		// With RAAN = siteLng + 90, that peak maps to [inc°N, siteLng].
-		const raanDeg = siteLng + 90;
+		// Compute RAAN so orbit aligns with the launch site
+		const raanDeg = computeRaan(siteLat, siteLng, m.inclination);
 
 		// Always draw the target orbit ring
 		const ringGeo = makeOrbitRing(m.altitude, m.inclination, raanDeg);
@@ -406,15 +472,10 @@
 		for (const act of m.activities) {
 			switch (act.type) {
 				case 'launch-to-orbit': {
-					const { vertGeo, pitchGeo, insertPos } = makeAscentArc(siteLat, siteLng, currentAlt, currentInc, raanDeg);
-					// Vertical segment
-					const vertLine = new THREE.Line(vertGeo, dashedLineMat(COL_ORBIT, 0.9));
-					vertLine.computeLineDistances();
-					group.add(vertLine);
-					// Pitchover segment
-					const pitchLine = new THREE.Line(pitchGeo, dashedLineMat(COL_ORBIT, 0.9));
-					pitchLine.computeLineDistances();
-					group.add(pitchLine);
+					const { geo: ascentGeo, insertPos } = makeAscentArc(siteLat, siteLng, currentAlt, currentInc, raanDeg);
+					const ascentLine = new THREE.Line(ascentGeo, dashedLineMat(COL_ORBIT, 0.9));
+					ascentLine.computeLineDistances();
+					group.add(ascentLine);
 					// Dots at launch site and orbit insertion
 					group.add(makeEventDot(sitePos, COL_ORBIT));
 					group.add(makeEventDot(insertPos, COL_ORBIT));

@@ -268,7 +268,7 @@
 		};
 	}
 
-	// ── Cubic Bezier ascent arc ──────────────────────
+	// ── Two-segment ascent arc: gravity-turn arch + straight coast ──
 	function makeAscentArc(
 		siteLat: number, siteLng: number,
 		targetAltKm: number, incDeg: number, raanDeg: number,
@@ -295,35 +295,75 @@
 		const heading = north0.clone().multiplyScalar(Math.cos(azFromNorth))
 			.addScaledVector(east0, Math.sin(azFromNorth)).normalize();
 
-		// Launch tangent: 60% up + 40% along azimuth heading
-		const launchTangent = up0.clone().multiplyScalar(0.6)
-			.addScaledVector(heading, 0.4).normalize();
+		// ── Segment 1: gravity-turn quarter-circle arch ──
+		// Turnover point: ~10° along heading at orbit altitude
+		const turnAngleDeg = 10;
+		const turnAngle = turnAngleDeg * Math.PI / 180;
+		// Rotate site direction toward heading by turnAngle on the sphere
+		const turnHat = sHat.clone().multiplyScalar(Math.cos(turnAngle))
+			.addScaledVector(heading, Math.sin(turnAngle)).normalize();
+		const Pturn = turnHat.clone().multiplyScalar(rOrbit);
 
-		const distScale = P3.clone().sub(P0).length();
-		const c1 = 0.3;
-		const c2 = 0.4;
+		// The heading direction at the turnover point (tangent along orbit surface)
+		const turnUp = turnHat.clone();
+		const turnHeading = heading.clone().multiplyScalar(Math.cos(turnAngle))
+			.addScaledVector(sHat, -Math.sin(turnAngle)).normalize();
 
-		const P1 = P0.clone().addScaledVector(launchTangent, distScale * c1);
-		const P2 = P3.clone().addScaledVector(joinTangent, -distScale * c2);
+		// Quarter-circle Bezier: P0 → up, Pturn → horizontal
+		// Use kappa = 0.5522847 for near-perfect quarter-circle
+		const kappa = 0.5522847;
+		const altOffset = rOrbit - rSurface;
+		const arcSize = Math.max(altOffset, 0.03); // visual minimum
+		// Scale arm lengths; vertical arm from P0, horizontal arm into Pturn
+		const arm1 = arcSize * kappa;
+		const arm2 = arcSize * kappa;
+		const C1 = P0.clone().addScaledVector(up0, arm1);
+		const C2 = Pturn.clone().addScaledVector(turnHeading, -arm2);
 
-		// §8: Sample cubic Bezier with monotonic altitude enforcement
-		const positions = new Float32Array((segments + 1) * 3);
+		// Sample the gravity-turn arch
+		const turnSegs = Math.floor(segments * 0.3);
+		const coastSegs = segments - turnSegs;
+		const totalPts = segments + 1;
+		const positions = new Float32Array(totalPts * 3);
+
 		let prevR = rSurface;
-		for (let idx = 0; idx <= segments; idx++) {
-			const t = idx / segments;
+		for (let i = 0; i <= turnSegs; i++) {
+			const t = i / turnSegs;
 			const mt = 1 - t;
-			// B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
-			const x = mt*mt*mt*P0.x + 3*mt*mt*t*P1.x + 3*mt*t*t*P2.x + t*t*t*P3.x;
-			const y = mt*mt*mt*P0.y + 3*mt*mt*t*P1.y + 3*mt*t*t*P2.y + t*t*t*P3.y;
-			const z = mt*mt*mt*P0.z + 3*mt*mt*t*P1.z + 3*mt*t*t*P2.z + t*t*t*P3.z;
-			// Enforce minimum radius (§8)
+			const x = mt*mt*mt*P0.x + 3*mt*mt*t*C1.x + 3*mt*t*t*C2.x + t*t*t*Pturn.x;
+			const y = mt*mt*mt*P0.y + 3*mt*mt*t*C1.y + 3*mt*t*t*C2.y + t*t*t*Pturn.y;
+			const z = mt*mt*mt*P0.z + 3*mt*mt*t*C1.z + 3*mt*t*t*C2.z + t*t*t*Pturn.z;
 			let r = Math.sqrt(x*x + y*y + z*z);
 			if (r < prevR) r = prevR;
 			prevR = r;
 			const scale = r / Math.sqrt(x*x + y*y + z*z);
-			positions[idx * 3]     = x * scale;
-			positions[idx * 3 + 1] = y * scale;
-			positions[idx * 3 + 2] = z * scale;
+			positions[i * 3]     = x * scale;
+			positions[i * 3 + 1] = y * scale;
+			positions[i * 3 + 2] = z * scale;
+		}
+
+		// ── Segment 2: straight line (great-circle slerp at orbit altitude) ──
+		const turnHatN = Pturn.clone().normalize();
+		const P3hat = P3.clone().normalize();
+		const dot = THREE.MathUtils.clamp(turnHatN.dot(P3hat), -1, 1);
+		const omega = Math.acos(dot);
+		const sinOmega = Math.sin(omega);
+
+		for (let i = 1; i <= coastSegs; i++) {
+			const t = i / coastSegs;
+			let dir: THREE.Vector3;
+			if (sinOmega < 0.0001) {
+				dir = turnHatN.clone().lerp(P3hat, t).normalize();
+			} else {
+				dir = turnHatN.clone().multiplyScalar(Math.sin((1 - t) * omega) / sinOmega)
+					.addScaledVector(P3hat, Math.sin(t * omega) / sinOmega).normalize();
+			}
+			// Interpolate radius from orbit to orbit (both at rOrbit)
+			const r = rOrbit;
+			const idx = turnSegs + i;
+			positions[idx * 3]     = dir.x * r;
+			positions[idx * 3 + 1] = dir.y * r;
+			positions[idx * 3 + 2] = dir.z * r;
 		}
 
 		const geo = new THREE.BufferGeometry();

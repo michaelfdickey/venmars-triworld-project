@@ -852,17 +852,29 @@
 
 	// Sync scheduled missions to the shared store for map visualization
 	$effect(() => {
-		scheduledMissionsStore.set(scheduledMissions.map(m => ({
-			name: m.name,
-			site: m.site,
-			inclination: m.inclination,
-			altitude: m.altitude,
-			apoapsis: m.apoapsis,
-			periapsis: m.periapsis,
-			circular: Math.abs(m.apoapsis - m.periapsis) < 1,
-			activities: m.activities.map(a => ({ type: a.type, notes: a.notes, targetAlt: a.targetAlt, targetInc: a.targetInc, payloadName: a.payloadName })),
-			reuseMode: m.reuseMode,
-		})));
+		scheduledMissionsStore.set(scheduledMissions.map(m => {
+			// Compute launch hour (hours since game epoch Jan 1 2030)
+			const [y, mo, d] = m.date.split('-').map(Number);
+			const [hh, mm] = m.time.split(':').map(Number);
+			const launchDate = new Date(Date.UTC(y, mo - 1, d, hh, mm, 0));
+			const epochMs = Date.UTC(2030, 0, 1, 0, 0, 0);
+			const launchHour = (launchDate.getTime() - epochMs) / 3_600_000;
+			return {
+				name: m.name,
+				site: m.site,
+				inclination: m.inclination,
+				altitude: m.altitude,
+				apoapsis: m.apoapsis,
+				periapsis: m.periapsis,
+				circular: Math.abs(m.apoapsis - m.periapsis) < 1,
+				activities: m.activities.map(a => ({ type: a.type, notes: a.notes, targetAlt: a.targetAlt, targetInc: a.targetInc, payloadName: a.payloadName })),
+				reuseMode: m.reuseMode,
+				date: m.date,
+				time: m.time,
+				status: m.status,
+				launchHour,
+			};
+		}));
 	});
 
 	let chosenFuel = $derived(fuelOptions.find(f => f.name === selectedFuel));

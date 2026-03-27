@@ -201,8 +201,9 @@
 		const colatDeg = isNorth ? (90 - lat) : (90 + lat);
 		const r = (colatDeg / latSpan) * radius;
 		const theta = (lng * Math.PI) / 180;
-		const x = isNorth ? cx + r * Math.sin(theta) : cx + r * Math.sin(theta);
-		const y = isNorth ? cy - r * Math.cos(theta) : cy + r * Math.cos(theta);
+		// North: 0° lng = down, east = right. South: mirrored so east is correct side
+		const x = isNorth ? cx + r * Math.sin(theta) : cx - r * Math.sin(theta);
+		const y = isNorth ? cy + r * Math.cos(theta) : cy + r * Math.cos(theta);
 		return { x, y, r };
 	}
 
@@ -210,7 +211,10 @@
 		if (!canvas || !polarWrap) return;
 
 		const containerW = polarWrap.clientWidth;
-		const size = Math.min(Math.floor((containerW - 40) / 2), 580);
+		const containerH = polarWrap.clientHeight || 600;
+		const maxByWidth = Math.floor((containerW - 40) / 2);
+		const maxByHeight = containerH - 60; // leave room for labels
+		const size = Math.min(maxByWidth, maxByHeight, 800);
 		canvas.width = size;
 		canvas.height = size;
 		canvas.style.width = size + 'px';
@@ -225,7 +229,7 @@
 		const cx = size / 2, cy = size / 2, radius = size / 2 - 4;
 		const ctx = canvas.getContext('2d')!;
 
-		// Pixel-by-pixel azimuthal projection
+		// Pixel-by-pixel azimuthal equidistant projection
 		const imgOut = ctx.createImageData(size, size);
 		for (let py = 0; py < size; py++) {
 			for (let px = 0; px < size; px++) {
@@ -236,9 +240,13 @@
 				// Colatitude in degrees from pole (0 = pole, latSpan = edge)
 				const colatDeg = (dist / radius) * latSpan;
 				const lat = isNorth ? 90 - colatDeg : -90 + colatDeg;
+
+				// Azimuth → longitude
+				// North pole: 0° lng = down on screen (standard cartographic convention)
+				// South pole: mirror so east is on the correct side when viewed from below
 				const lng = isNorth
-					? Math.atan2(dx, -dy) * (180 / Math.PI)
-					: Math.atan2(dx, dy) * (180 / Math.PI);
+					? Math.atan2(dx, dy) * (180 / Math.PI)
+					: Math.atan2(-dx, dy) * (180 / Math.PI);
 
 				// Map to texture coords
 				const tyFrac = (tex.latMax - lat) / (tex.latMax - tex.latMin);
@@ -387,12 +395,15 @@
 		const moon = new THREE.Mesh(geometry, material);
 		scene.add(moon);
 
-		// Ambient + directional light (sun-like)
-		const ambient = new THREE.AmbientLight(0xffffff, 0.15);
+		// Lighting — high ambient so entire surface is clearly visible
+		const ambient = new THREE.AmbientLight(0xffffff, 7.0);
 		scene.add(ambient);
-		const sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
+		const sunLight = new THREE.DirectionalLight(0xffffff, 4.0);
 		sunLight.position.set(5, 3, 5);
 		scene.add(sunLight);
+		const fillLight = new THREE.DirectionalLight(0xffffff, 3.0);
+		fillLight.position.set(-4, -1, -3);
+		scene.add(fillLight);
 
 		// Load progressive textures
 		const base = 'https://trek.nasa.gov/tiles/Moon/EQ/LRO_WAC_Mosaic_Global_303ppd/1.0.0/default/default028mm';
@@ -545,7 +556,7 @@
 			if (!isDragging) return;
 			const dx = e.clientX - prevX;
 			const dy = e.clientY - prevY;
-			rotY += dx * 0.005;
+			rotY -= dx * 0.005;
 			rotX += dy * 0.005;
 			rotX = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, rotX));
 			prevX = e.clientX;

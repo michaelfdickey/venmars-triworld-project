@@ -1,15 +1,35 @@
 <script lang="ts">
-	import { gameState, gameTime, simSpeedIndex, speedPresets, formatGameTimestamp } from '$lib/stores/gameStore';
+	import { gameState, gameTime, simSpeedIndex, paused, speedPresets, formatGameTimestamp } from '$lib/stores/gameStore';
 
-	let state = $derived($gameState);
+	let gameStateVal = $derived($gameState);
 	let timestamp = $derived(formatGameTimestamp($gameTime));
 	let currentPreset = $derived(speedPresets[$simSpeedIndex]);
-	let isPaused = $derived($simSpeedIndex === 0);
+	let isPaused = $derived($paused);
+	let dropdownOpen = $state(false);
+
+	function togglePause() {
+		$paused = !$paused;
+	}
 
 	function setSpeed(index: number) {
 		$simSpeedIndex = index;
+		$paused = false;
+		dropdownOpen = false;
+	}
+
+	function toggleDropdown() {
+		dropdownOpen = !dropdownOpen;
+	}
+
+	function handleClickOutside(event: MouseEvent) {
+		const target = event.target as HTMLElement;
+		if (!target.closest('.speed-controls')) {
+			dropdownOpen = false;
+		}
 	}
 </script>
+
+<svelte:window onclick={handleClickOutside} />
 
 <div class="status-bar">
 	<div class="status-left">
@@ -21,30 +41,57 @@
 		<!-- Milestone indicators -->
 		<div class="flex items-center gap-3 text-xs">
 			<span class="flex items-center gap-1" title="Lunar Mass Driver">
-				<span class="w-2 h-2 rounded-full {state?.milestones.lunar_mass_driver ? 'bg-[var(--color-accent-green)]' : 'bg-[var(--color-border)]'}"></span>
+				<span class="w-2 h-2 rounded-full {gameStateVal?.milestones.lunar_mass_driver ? 'bg-[var(--color-accent-green)]' : 'bg-[var(--color-border)]'}"></span>
 				LMD
 			</span>
 			<span class="flex items-center gap-1" title="Venus Mass Driver">
-				<span class="w-2 h-2 rounded-full {state?.milestones.venus_mass_driver ? 'bg-[var(--color-accent-green)]' : 'bg-[var(--color-border)]'}"></span>
+				<span class="w-2 h-2 rounded-full {gameStateVal?.milestones.venus_mass_driver ? 'bg-[var(--color-accent-green)]' : 'bg-[var(--color-border)]'}"></span>
 				VMD
 			</span>
 			<span class="flex items-center gap-1" title="Asteroid Harvesting">
-				<span class="w-2 h-2 rounded-full {state?.milestones.asteroid_harvesting ? 'bg-[var(--color-accent-green)]' : 'bg-[var(--color-border)]'}"></span>
+				<span class="w-2 h-2 rounded-full {gameStateVal?.milestones.asteroid_harvesting ? 'bg-[var(--color-accent-green)]' : 'bg-[var(--color-border)]'}"></span>
 				AST
 			</span>
 		</div>
 
 		<!-- Speed controls -->
 		<div class="speed-controls">
-			{#each speedPresets as preset, i}
-				<button
-					class="speed-btn"
-					class:active={$simSpeedIndex === i}
-					onclick={() => setSpeed(i)}
-				>
-					{preset.label}
-				</button>
-			{/each}
+			<button
+				class="speed-btn"
+				class:active={isPaused}
+				onclick={togglePause}
+				title="Pause"
+			>
+				⏸
+			</button>
+			<button
+				class="speed-btn"
+				class:active={!isPaused}
+				onclick={togglePause}
+				title="Play"
+			>
+				▶
+			</button>
+			<button
+				class="speed-btn current-speed"
+				onclick={toggleDropdown}
+			>
+				{currentPreset.label}
+				<span class="dropdown-arrow">{dropdownOpen ? '▲' : '▼'}</span>
+			</button>
+			{#if dropdownOpen}
+				<div class="speed-dropdown">
+					{#each speedPresets as preset, i}
+						<button
+							class="speed-dropdown-item"
+							class:active={$simSpeedIndex === i}
+							onclick={() => setSpeed(i)}
+						>
+							{preset.label}
+						</button>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	</div>
 </div>
@@ -89,6 +136,7 @@
 	.speed-controls {
 		display: flex;
 		gap: 0.25rem;
+		position: relative;
 	}
 
 	.speed-btn {
@@ -112,5 +160,57 @@
 		background: var(--color-accent-earth);
 		color: #fff;
 		border-color: var(--color-accent-earth);
+	}
+
+	.current-speed {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		min-width: 3rem;
+		justify-content: center;
+	}
+
+	.dropdown-arrow {
+		font-size: 0.5rem;
+		opacity: 0.7;
+	}
+
+	.speed-dropdown {
+		position: absolute;
+		top: 100%;
+		right: 0;
+		margin-top: 0.25rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		background: var(--color-bg-panel);
+		border: 1px solid var(--color-border);
+		border-radius: 0.35rem;
+		padding: 0.25rem;
+		z-index: 100;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+	}
+
+	.speed-dropdown-item {
+		padding: 0.3rem 0.75rem;
+		border: none;
+		border-radius: 0.2rem;
+		background: transparent;
+		color: var(--color-text-dim);
+		font-size: 0.7rem;
+		cursor: pointer;
+		white-space: nowrap;
+		text-align: center;
+		transition: all 0.1s;
+	}
+
+	.speed-dropdown-item:hover {
+		background: var(--color-border);
+		color: var(--color-text);
+	}
+
+	.speed-dropdown-item.active {
+		background: var(--color-accent-earth);
+		color: #fff;
 	}
 </style>

@@ -18,13 +18,23 @@ export interface SpeedPreset {
 }
 
 export const speedPresets: SpeedPreset[] = [
-	{ id: 'paused',    label: '⏸ Paused',    hoursPerSecond: 0 },
-	{ id: 'realtime',  label: '▶ Real Time', hoursPerSecond: 1 / 3600 },  // 1 real-second = 1 game-second
-	{ id: '1min',      label: '⏩ 1 min/f',   hoursPerSecond: 1 / 60 * 60 },  // 1 minute per frame @ 60fps → 60 min/s = 1 hr/s
+	{ id: 'realtime',  label: 'RT',    hoursPerSecond: 1 / 3600 },        // 1 real-second = 1 game-second
+	{ id: '1m',        label: '1m',    hoursPerSecond: 1 / 60 },          // 1 game-minute per real-second
+	{ id: '2m',        label: '2m',    hoursPerSecond: 2 / 60 },          // 2 game-minutes per real-second
+	{ id: '15m',       label: '15m',   hoursPerSecond: 15 / 60 },         // 15 game-minutes per real-second
+	{ id: '1hr',       label: '1hr',   hoursPerSecond: 1 },               // 1 game-hour per real-second
+	{ id: '6hr',       label: '6hr',   hoursPerSecond: 6 },               // 6 game-hours per real-second
+	{ id: '1d',        label: '1d',    hoursPerSecond: 24 },              // 1 game-day per real-second
+	{ id: '7d',        label: '7d',    hoursPerSecond: 24 * 7 },          // 7 game-days per real-second
+	{ id: '1mo',       label: '1mo',   hoursPerSecond: 24 * 30 },         // 1 game-month per real-second
 ];
 
-export const simSpeedIndex = writable<number>(0); // index into speedPresets, default paused
-export const simSpeed = derived(simSpeedIndex, idx => speedPresets[idx]?.hoursPerSecond ?? 0);
+export const simSpeedIndex = writable<number>(0); // index into speedPresets, default RT
+export const paused = writable<boolean>(true);    // separate pause state
+export const simSpeed = derived(
+	[simSpeedIndex, paused],
+	([idx, isPaused]) => isPaused ? 0 : (speedPresets[idx]?.hoursPerSecond ?? 0)
+);
 
 // Derive a calendar date from gameTime
 export function gameTimeToDate(hours: number): Date {
@@ -870,6 +880,10 @@ export interface ScheduledMissionMapData {
 	circular: boolean;
 	activities: MissionMapActivity[];
 	reuseMode: ReuseMode;
+	date: string;        // 'YYYY-MM-DD'
+	time: string;        // 'HH:MM'
+	status: string;      // 'pending' | 'in-transit' | 'completed' | 'failed'
+	launchHour: number;  // hours since GAME_EPOCH for quick comparison
 }
 export const scheduledMissionsStore = writable<ScheduledMissionMapData[]>([]);
 

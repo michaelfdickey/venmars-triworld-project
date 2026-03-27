@@ -3,6 +3,7 @@
 	import * as THREE from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 	import { scheduledMissionsStore, gameTime, gameTimeToDate, claimedComplexes, type ScheduledMissionMapData } from '$lib/stores/gameStore';
+	import { get } from 'svelte/store';
 
 	let { onSiteClick = (_name: string) => {} }: { onSiteClick?: (name: string) => void } = $props();
 
@@ -61,6 +62,49 @@
 	let missionGroup: THREE.Group;
 	// Launch site markers group
 	let siteGroup: THREE.Group;
+
+	// ── Active rocket dots (animated per frame) ───────────
+	// Each entry holds the Three.js mesh + precomputed path for one active mission
+	interface RocketPath {
+		missionName: string;
+		launchHour: number;  // hours since epoch
+		phases: MissionPhase[];
+		totalDurationH: number;
+		mesh: THREE.Mesh;
+		glowMesh: THREE.Mesh;
+	}
+	interface MissionPhase {
+		type: string;
+		startH: number;              // offset from launch (hours)
+		durationH: number;
+		samplePosition: (t: number) => THREE.Vector3;  // t ∈ [0,1]
+	}
+	let rocketPaths: RocketPath[] = [];
+	let rocketGroup: THREE.Group;
+
+	// Phase durations (hours) — realistic-ish for LEO missions
+	const PHASE_DURATION_H: Record<string, number> = {
+		'launch-to-orbit':  0.15,    // ~9 min ascent
+		'circularize':      0.05,    // ~3 min burn
+		'deploy-payload':   0.08,    // ~5 min
+		'plane-change':     0.05,    // ~3 min burn
+		'change-orbit':     0.75,    // ~45 min Hohmann coast
+		'deorbit':          0.5,     // ~30 min descent
+		'station-keep':     1.0,     // 1 hour on-station segment shown
+		'rendezvous':       1.5,     // ~90 min approach
+		'dock':             0.25,    // ~15 min
+		'land':             0.5,     // ~30 min
+		'hohmann-transfer': 2.0,     // 2 hours segment shown
+		'aerobrake':        0.5,     // ~30 min
+	};
+
+	// Orbital period (hours) for a given altitude
+	function orbitalPeriodH(altKm: number): number {
+		const mu = 398600.4418; // km³/s² Earth
+		const r = 6371 + altKm; // km
+		const T = 2 * Math.PI * Math.sqrt(r * r * r / mu); // seconds
+		return T / 3600;
+	}
 
 	// ── Light refs (updated reactively for day/night) ─────
 	let sunLight: THREE.DirectionalLight;
@@ -192,6 +236,22 @@
 	// ── §4: Prograde tangent at any point on the orbit ───
 	function progradeAt(rHat: THREE.Vector3, nHat: THREE.Vector3): THREE.Vector3 {
 		return new THREE.Vector3().crossVectors(nHat, rHat).normalize();
+	}
+
+	// ── Point on orbit ring at angle (degrees) ───────────
+	function orbitPoint(altKm: number, incDeg: number, raanDeg: number, angleDeg: number): THREE.Vector3 {
+		const r = altToRadius(altKm);
+		const nHat = orbitNormal(incDeg, raanDeg);
+		const worldUp = new THREE.Vector3(0, 1, 0);
+		const helper = Math.abs(nHat.dot(worldUp)) < 0.95 ? worldUp : new THREE.Vector3(1, 0, 0);
+		const uBasis = new THREE.Vector3().crossVectors(helper, nHat).normalize();
+		const vBasis = new THREE.Vector3().crossVectors(nHat, uBasis).normalize();
+		const t = angleDeg * Math.PI / 180;
+		return new THREE.Vector3(
+			r * (Math.cos(t) * uBasis.x + Math.sin(t) * vBasis.x),
+			r * (Math.cos(t) * uBasis.y + Math.sin(t) * vBasis.y),
+			r * (Math.cos(t) * uBasis.z + Math.sin(t) * vBasis.z),
+		);
 	}
 
 	// ── Compute RAAN to align orbit with launch site ─────
@@ -531,14 +591,11 @@
 				case 'change-orbit': {
 					const prevAlt = currentAlt;
 					const newAlt = act.targetAlt ?? currentAlt;
-					// Transfer arc: pick two points 90° apart on the orbit
-					const theta1 = (orbitIndex * 47) * Math.PI / 180; // slightly different angle per orbit
-					const r1 = altToRadius(prevAlt);
-					const r2 = altToRadius(newAlt);
-					// Use a point on the current orbit and a point on the new orbit
-					const from = latLngToVec3(currentInc * 0.5, raanDeg + 30, r1);
-					const to = latLngToVec3(currentInc * 0.5, raanDeg + 120, r2);
-					const peakR = Math.max(r1, r2) * 1.02;
+					// Transfer arc between two points on the orbit plane
+					const fromAngle = 30 + orbitIndex * 47;
+					const from = orbitPoint(prevAlt, currentInc, raanDeg, fromAngle);
+					const to = orbitPoint(newAlt, currentInc, raanDeg, fromAngle + 90);
+					const peakR = Math.max(altToRadius(prevAlt), altToRadius(newAlt)) * 1.02;
 					const transferGeo = makeArc(from, to, peakR, 48);
 					const transferLine = new THREE.Line(transferGeo, dashedLineMat(COL_TRANSFER, 0.7));
 					transferLine.computeLineDistances();
@@ -558,9 +615,8 @@
 				case 'plane-change': {
 					const prevInc = currentInc;
 					const newInc = act.targetInc ?? currentInc;
-					const r = altToRadius(currentAlt);
-					// Dot at maneuver point
-					const maneuverPt = latLngToVec3(prevInc * 0.3, raanDeg + 60, r);
+					// Dot at maneuver point on orbit plane
+					const maneuverPt = orbitPoint(currentAlt, prevInc, raanDeg, 60);
 					group.add(makeEventDot(maneuverPt, COL_EVENT));
 					// Draw new orbit ring with new inclination
 					currentInc = newInc;
@@ -572,14 +628,9 @@
 				}
 
 				case 'deploy-payload': {
-					// Dot on orbit at a spread-out angle
-					const r = altToRadius(currentAlt);
-					const angle = 45 + orbitIndex * 30; // spread deployments around the ring
-					const deployPt = latLngToVec3(
-						currentInc * 0.4 * Math.sin(angle * Math.PI / 180),
-						raanDeg + angle,
-						r
-					);
+					// Dot on orbit ring at a spread-out angle
+					const angle = 45 + orbitIndex * 30;
+					const deployPt = orbitPoint(currentAlt, currentInc, raanDeg, angle);
 					group.add(makeEventDot(deployPt, COL_DEPLOY));
 					orbitIndex++;
 					break;
@@ -587,18 +638,11 @@
 
 				case 'deorbit': {
 					// Fading arc from orbit down to surface
-					const r = altToRadius(currentAlt);
-					const deorbitStart = latLngToVec3(
-						currentInc * 0.3,
-						raanDeg + 180,
-						r
-					);
-					const landingPt = latLngToVec3(
-						currentInc * 0.2,
-						raanDeg + 220,
-						EARTH_RADIUS * 1.001
-					);
-					const peakR = r * 0.85;
+					const deorbitStart = orbitPoint(currentAlt, currentInc, raanDeg, 180);
+					// Landing point 40° further along, projected down to surface
+					const landingDir = orbitPoint(currentAlt, currentInc, raanDeg, 220).normalize();
+					const landingPt = landingDir.multiplyScalar(EARTH_RADIUS * 1.001);
+					const peakR = altToRadius(currentAlt) * 0.85;
 					const deorbitGeo = makeArc(deorbitStart, landingPt, peakR, 48);
 
 					// Create fading material (lower opacity)
@@ -638,6 +682,304 @@
 		}
 	}
 
+	// ── Build animated rocket paths for live missions ────
+	function buildRocketPaths(missions: ScheduledMissionMapData[]) {
+		// Clear old rocket meshes
+		if (rocketGroup) {
+			while (rocketGroup.children.length > 0) {
+				const child = rocketGroup.children[0];
+				rocketGroup.remove(child);
+				if (child instanceof THREE.Mesh) {
+					child.geometry.dispose();
+					if (child.material instanceof THREE.Material) child.material.dispose();
+				}
+			}
+		}
+		rocketPaths = [];
+
+		for (const m of missions) {
+			if (m.status !== 'pending' && m.status !== 'in-transit') continue;
+
+			const siteLoc = resolveSite(m.site);
+			if (!siteLoc) continue;
+			const siteLat = siteLoc[0];
+			const siteLng = siteLoc[1];
+			const raanDeg = computeRaan(siteLat, siteLng, m.inclination);
+
+			const phases: MissionPhase[] = [];
+			let cursor = 0; // cumulative hours from launch
+			let currentAlt = m.altitude;
+			let currentInc = m.inclination;
+			let orbitAngleOffset = 0;
+
+			for (const act of m.activities) {
+				const dur = PHASE_DURATION_H[act.type] ?? 0.1;
+
+				switch (act.type) {
+					case 'launch-to-orbit': {
+						// Sample along ascent arc geometry
+						const rOrbit = altToRadius(currentAlt);
+						const rSurface = EARTH_RADIUS * 1.001;
+						const sHat = latLngToVec3(siteLat, siteLng, 1).normalize();
+						const P0 = sHat.clone().multiplyScalar(rSurface);
+						const { anchorPos: P3 } = computeAnchor(siteLat, siteLng, currentInc, raanDeg, rOrbit);
+
+						// Bezier control points (same as makeAscentArc)
+						const worldUp = new THREE.Vector3(0, 1, 0);
+						const up0 = sHat.clone();
+						const east0 = new THREE.Vector3().crossVectors(worldUp, sHat).normalize();
+						const north0 = new THREE.Vector3().crossVectors(sHat, east0).normalize();
+						const incRad = Math.max(Math.abs(siteLat), currentInc) * Math.PI / 180;
+						const latRad = Math.abs(siteLat) * Math.PI / 180;
+						const cosRatio = Math.min(1, Math.cos(incRad) / Math.max(0.01, Math.cos(latRad)));
+						const azFromNorth = Math.asin(cosRatio);
+						const heading = north0.clone().multiplyScalar(Math.cos(azFromNorth))
+							.addScaledVector(east0, Math.sin(azFromNorth)).normalize();
+
+						const turnAngle = 10 * Math.PI / 180;
+						const turnHat = sHat.clone().multiplyScalar(Math.cos(turnAngle))
+							.addScaledVector(heading, Math.sin(turnAngle)).normalize();
+						const Pturn = turnHat.clone().multiplyScalar(rOrbit);
+						const turnHeading = heading.clone().multiplyScalar(Math.cos(turnAngle))
+							.addScaledVector(sHat, -Math.sin(turnAngle)).normalize();
+
+						const kappa = 0.5522847;
+						const altOffset = rOrbit - rSurface;
+						const arcSize = Math.max(altOffset, 0.03);
+						const C1 = P0.clone().addScaledVector(up0, arcSize * kappa);
+						const C2 = Pturn.clone().addScaledVector(turnHeading, -arcSize * kappa);
+
+						const turnHatN = Pturn.clone().normalize();
+						const P3hat = P3.clone().normalize();
+						const dot = THREE.MathUtils.clamp(turnHatN.dot(P3hat), -1, 1);
+						const omega = Math.acos(dot);
+						const sinOmega = Math.sin(omega);
+
+						const capturedP0 = P0.clone(), capturedC1 = C1.clone(), capturedC2 = C2.clone();
+						const capturedPturn = Pturn.clone(), capturedTurnHatN = turnHatN.clone();
+						const capturedP3hat = P3hat.clone(), capturedROrbit = rOrbit;
+						const capturedOmega = omega, capturedSinOmega = sinOmega;
+
+						phases.push({
+							type: act.type, startH: cursor, durationH: dur,
+							samplePosition: (t: number) => {
+								// t [0,1] over the full ascent
+								if (t <= 0.3) {
+									// Bezier gravity-turn
+									const u = t / 0.3;
+									const mu = 1 - u;
+									return new THREE.Vector3(
+										mu*mu*mu*capturedP0.x + 3*mu*mu*u*capturedC1.x + 3*mu*u*u*capturedC2.x + u*u*u*capturedPturn.x,
+										mu*mu*mu*capturedP0.y + 3*mu*mu*u*capturedC1.y + 3*mu*u*u*capturedC2.y + u*u*u*capturedPturn.y,
+										mu*mu*mu*capturedP0.z + 3*mu*mu*u*capturedC1.z + 3*mu*u*u*capturedC2.z + u*u*u*capturedPturn.z,
+									);
+								} else {
+									// Great-circle slerp coast
+									const u = (t - 0.3) / 0.7;
+									let dir: THREE.Vector3;
+									if (capturedSinOmega < 0.0001) {
+										dir = capturedTurnHatN.clone().lerp(capturedP3hat, u).normalize();
+									} else {
+										dir = capturedTurnHatN.clone().multiplyScalar(Math.sin((1 - u) * capturedOmega) / capturedSinOmega)
+											.addScaledVector(capturedP3hat, Math.sin(u * capturedOmega) / capturedSinOmega).normalize();
+									}
+									return dir.multiplyScalar(capturedROrbit);
+								}
+							},
+						});
+						break;
+					}
+
+					case 'circularize': {
+						// Dot stays at orbital insertion point, slight forward drift
+						const insertPt = orbitPoint(currentAlt, currentInc, raanDeg, orbitAngleOffset);
+						phases.push({
+							type: act.type, startH: cursor, durationH: dur,
+							samplePosition: (t: number) => {
+								return orbitPoint(currentAlt, currentInc, raanDeg, orbitAngleOffset + t * 5);
+							},
+						});
+						orbitAngleOffset += 5;
+						break;
+					}
+
+					case 'deploy-payload': {
+						const baseAngle = orbitAngleOffset;
+						const capturedAlt = currentAlt, capturedInc = currentInc;
+						phases.push({
+							type: act.type, startH: cursor, durationH: dur,
+							samplePosition: (t: number) => {
+								return orbitPoint(capturedAlt, capturedInc, raanDeg, baseAngle + t * 10);
+							},
+						});
+						orbitAngleOffset += 10;
+						break;
+					}
+
+					case 'change-orbit': {
+						const fromAlt = currentAlt;
+						const toAlt = act.targetAlt ?? currentAlt;
+						const fromAngle = orbitAngleOffset;
+						const capturedInc = currentInc;
+						phases.push({
+							type: act.type, startH: cursor, durationH: dur,
+							samplePosition: (t: number) => {
+								const alt = fromAlt + (toAlt - fromAlt) * t;
+								return orbitPoint(alt, capturedInc, raanDeg, fromAngle + t * 90);
+							},
+						});
+						currentAlt = toAlt;
+						orbitAngleOffset += 90;
+						break;
+					}
+
+					case 'plane-change': {
+						const fromInc = currentInc;
+						const toInc = act.targetInc ?? currentInc;
+						const baseAngle = orbitAngleOffset;
+						const capturedAlt = currentAlt;
+						phases.push({
+							type: act.type, startH: cursor, durationH: dur,
+							samplePosition: (t: number) => {
+								const inc = fromInc + (toInc - fromInc) * t;
+								return orbitPoint(capturedAlt, inc, raanDeg, baseAngle + t * 10);
+							},
+						});
+						currentInc = toInc;
+						orbitAngleOffset += 10;
+						break;
+					}
+
+					case 'deorbit': {
+						// Arc from orbit down to surface
+						const deorbitAngle = orbitAngleOffset + 180;
+						const capturedAlt = currentAlt, capturedInc = currentInc;
+						const startPt = orbitPoint(capturedAlt, capturedInc, raanDeg, deorbitAngle);
+						const landDir = orbitPoint(capturedAlt, capturedInc, raanDeg, deorbitAngle + 40).normalize();
+						const landPt = landDir.multiplyScalar(EARTH_RADIUS * 1.001);
+						phases.push({
+							type: act.type, startH: cursor, durationH: dur,
+							samplePosition: (t: number) => {
+								// Slerp + descend
+								const dir = startPt.clone().normalize().lerp(landPt.clone().normalize(), t).normalize();
+								const rFrom = startPt.length();
+								const rTo = landPt.length();
+								const r = rFrom + (rTo - rFrom) * t;
+								return dir.multiplyScalar(r);
+							},
+						});
+						break;
+					}
+
+					default: {
+						// station-keep, rendezvous, dock, land, etc: orbit at current position
+						const baseAngle = orbitAngleOffset;
+						const period = orbitalPeriodH(currentAlt);
+						const capturedAlt = currentAlt, capturedInc = currentInc;
+						phases.push({
+							type: act.type, startH: cursor, durationH: dur,
+							samplePosition: (t: number) => {
+								const angularRate = 360 / period; // deg/hr
+								const angle = baseAngle + angularRate * dur * t;
+								return orbitPoint(capturedAlt, capturedInc, raanDeg, angle);
+							},
+						});
+						// Advance orbit angle by however far we'd travel
+						orbitAngleOffset += (360 / orbitalPeriodH(currentAlt)) * dur;
+						break;
+					}
+				}
+				cursor += dur;
+			}
+
+			if (phases.length === 0) continue;
+
+			// Create glowing rocket dot
+			const rocketGeo = new THREE.SphereGeometry(0.018, 12, 8);
+			const rocketMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+			const rocketMesh = new THREE.Mesh(rocketGeo, rocketMat);
+			rocketMesh.visible = false;
+
+			// Glow halo
+			const glowGeo = new THREE.SphereGeometry(0.035, 12, 8);
+			const glowMat = new THREE.MeshBasicMaterial({
+				color: 0xff6600,
+				transparent: true,
+				opacity: 0.35,
+			});
+			const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+			glowMesh.visible = false;
+
+			rocketGroup.add(rocketMesh);
+			rocketGroup.add(glowMesh);
+
+			rocketPaths.push({
+				missionName: m.name,
+				launchHour: m.launchHour,
+				phases,
+				totalDurationH: cursor,
+				mesh: rocketMesh,
+				glowMesh,
+			});
+		}
+	}
+
+	// ── Per-frame rocket dot update ──────────────────────
+	function updateRocketDots(currentGameHours: number) {
+		for (const rp of rocketPaths) {
+			const elapsed = currentGameHours - rp.launchHour;
+
+			if (elapsed < 0 || elapsed > rp.totalDurationH) {
+				// Not yet launched or mission complete
+				rp.mesh.visible = false;
+				rp.glowMesh.visible = false;
+				continue;
+			}
+
+			// Find current phase
+			let found = false;
+			for (const phase of rp.phases) {
+				if (elapsed >= phase.startH && elapsed < phase.startH + phase.durationH) {
+					const t = (elapsed - phase.startH) / phase.durationH;
+					const pos = phase.samplePosition(Math.max(0, Math.min(1, t)));
+					rp.mesh.position.copy(pos);
+					rp.glowMesh.position.copy(pos);
+					rp.mesh.visible = true;
+					rp.glowMesh.visible = true;
+
+					// Color by phase
+					const mat = rp.mesh.material as THREE.MeshBasicMaterial;
+					const glowMat = rp.glowMesh.material as THREE.MeshBasicMaterial;
+					switch (phase.type) {
+						case 'launch-to-orbit':
+							mat.color.setHex(0xffffff);
+							glowMat.color.setHex(0xff6600);
+							break;
+						case 'deorbit':
+							mat.color.setHex(0xff4444);
+							glowMat.color.setHex(0xff2200);
+							break;
+						case 'deploy-payload':
+							mat.color.setHex(0xa78bfa);
+							glowMat.color.setHex(0x8b5cf6);
+							break;
+						default:
+							mat.color.setHex(0xffffff);
+							glowMat.color.setHex(0x3b82f6);
+							break;
+					}
+
+					found = true;
+					break;
+				}
+			}
+			if (!found) {
+				rp.mesh.visible = false;
+				rp.glowMesh.visible = false;
+			}
+		}
+	}
+
 	// ── Rebuild all mission visuals ──────────────────────
 	function rebuildMissions(missions: ScheduledMissionMapData[]) {
 		if (!scene || !missionGroup) return;
@@ -659,6 +1001,9 @@
 		for (const m of missions) {
 			buildMissionVisuals(m, missionGroup);
 		}
+
+		// Rebuild animated rocket paths
+		buildRocketPaths(missions);
 	}
 
 	// ── Reactive: rebuild when store changes ─────────────
@@ -730,6 +1075,10 @@
 		// Mission group
 		missionGroup = new THREE.Group();
 		scene.add(missionGroup);
+
+		// Rocket animation group
+		rocketGroup = new THREE.Group();
+		scene.add(rocketGroup);
 
 		// Launch site markers group
 		siteGroup = new THREE.Group();
@@ -884,6 +1233,9 @@
 			frameId = requestAnimationFrame(animate);
 			controls.update();
 
+			// Animate rocket dots based on current game time
+			updateRocketDots(get(gameTime));
+
 			// Per-marker scale to lock apparent size when zoomed in
 			if (siteGroup.visible) {
 				const dist = camera.position.length();
@@ -894,6 +1246,21 @@
 					}
 				} else {
 					for (const child of siteGroup.children) {
+						child.scale.setScalar(1);
+					}
+				}
+			}
+
+			// Scale rocket dots too
+			if (rocketGroup.visible) {
+				const dist = camera.position.length();
+				if (dist < LOCK_DIST) {
+					const s = dist / LOCK_DIST;
+					for (const child of rocketGroup.children) {
+						child.scale.setScalar(s);
+					}
+				} else {
+					for (const child of rocketGroup.children) {
 						child.scale.setScalar(1);
 					}
 				}
@@ -950,6 +1317,7 @@
 		<span class="legend-item"><span class="legend-swatch" style="background: #a78bfa;"></span> Deploy</span>
 		<span class="legend-item"><span class="legend-swatch" style="background: #ef4444;"></span> Deorbit</span>
 		<span class="legend-item"><span class="legend-swatch" style="background: #22c55e;"></span> Booster Return</span>
+		<span class="legend-item"><span class="legend-swatch" style="background: #ffffff; border: 1px solid #666;"></span> Active Rocket</span>
 	</div>
 	{/if}
 </div>

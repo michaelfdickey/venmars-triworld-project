@@ -31,7 +31,7 @@
 	};
 
 	// --- Equirectangular (Leaflet) ---
-	let mapContainer: HTMLDivElement;
+	let mapContainer = $state<HTMLDivElement>(null!);
 	let leafletMap: L.Map | null = null;
 
 	async function initLeaflet() {
@@ -102,9 +102,9 @@
 	}
 
 	// --- Canvas polar rendering with zoom ---
-	let northCanvas: HTMLCanvasElement;
-	let southCanvas: HTMLCanvasElement;
-	let polarWrap: HTMLDivElement;
+	let northCanvas = $state<HTMLCanvasElement>(null!);
+	let southCanvas = $state<HTMLCanvasElement>(null!);
+	let polarWrap = $state<HTMLDivElement>(null!);
 
 	// Zoom state: latSpan = degrees of latitude visible from pole to edge of circle
 	// At min zoom (90°) you see the whole hemisphere; at max zoom (5°) you see only near the pole
@@ -349,19 +349,299 @@
 		}
 	}
 
+	// --- Three.js Spherical Globe ---
+	let globeContainer = $state<HTMLDivElement>(null!);
+	let threeCleanup: (() => void) | null = null;
+
+	async function initGlobe() {
+		if (threeCleanup) return;
+		await tick();
+		if (!globeContainer) return;
+
+		const THREE = await import('three');
+
+		const width = globeContainer.clientWidth;
+		const height = Math.max(globeContainer.clientHeight, 500);
+
+		// Scene
+		const scene = new THREE.Scene();
+		scene.background = new THREE.Color(0x0a0a0f);
+
+		// Camera
+		const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+		camera.position.set(0, 0, 3);
+
+		// Renderer
+		const renderer = new THREE.WebGLRenderer({ antialias: true });
+		renderer.setSize(width, height);
+		renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+		globeContainer.appendChild(renderer.domElement);
+
+		// Moon sphere — start with placeholder color, texture loads async
+		const geometry = new THREE.SphereGeometry(1, 128, 64);
+		const material = new THREE.MeshStandardMaterial({
+			color: 0x888888,
+			roughness: 1,
+			metalness: 0,
+		});
+		const moon = new THREE.Mesh(geometry, material);
+		scene.add(moon);
+
+		// Ambient + directional light (sun-like)
+		const ambient = new THREE.AmbientLight(0xffffff, 0.15);
+		scene.add(ambient);
+		const sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
+		sunLight.position.set(5, 3, 5);
+		scene.add(sunLight);
+
+		// Load progressive textures
+		const base = 'https://trek.nasa.gov/tiles/Moon/EQ/LRO_WAC_Mosaic_Global_303ppd/1.0.0/default/default028mm';
+
+		function loadTiledTexture(zoom: number): Promise<HTMLCanvasElement> {
+			const nCols = Math.pow(2, zoom) * 2; // EPSG:4326
+			const nRows = Math.pow(2, zoom);
+			const tw = 256;
+			const texCanvas = document.createElement('canvas');
+			texCanvas.width = nCols * tw;
+			texCanvas.height = nRows * tw;
+			const ctx = texCanvas.getContext('2d')!;
+
+			const promises: Promise<void>[] = [];
+			for (let r = 0; r < nRows; r++) {
+				for (let c = 0; c < nCols; c++) {
+					promises.push(new Promise<void>(resolve => {
+						const img = new Image();
+						img.crossOrigin = 'anonymous';
+						img.onload = () => { ctx.drawImage(img, c * tw, r * tw, tw, tw); resolve(); };
+						img.onerror = () => resolve();
+						img.src = `${base}/${zoom}/${r}/${c}.jpg`;
+					}));
+				}
+			}
+			return Promise.all(promises).then(() => texCanvas);
+		}
+
+		// Load zoom-2 first (fast, 16×4 = 64 tiles, 4096×1024)
+		let destroyed = false;
+		loadTiledTexture(2).then(canvas => {
+			if (destroyed) return;
+			const tex = new THREE.CanvasTexture(canvas);
+			tex.colorSpace = THREE.SRGBColorSpace;
+			material.map = tex;
+			material.needsUpdate = true;
+
+			// Then load zoom-4 for higher detail (512 tiles, 16384×4096)
+			loadTiledTexture(4).then(canvas4 => {
+				if (destroyed) return;
+				const tex4 = new THREE.CanvasTexture(canvas4);
+				tex4.colorSpace = THREE.SRGBColorSpace;
+				tex4.anisotropy = renderer.capabilities.getMaxAnisotropy();
+				material.map = tex4;
+				material.needsUpdate = true;
+				tex.dispose();
+			});
+		});
+
+		// Site markers as sprites
+		const markerGroup = new THREE.Group();
+		scene.add(markerGroup);
+
+		for (const site of lunarSites) {
+			const color = siteColors[site.type];
+			// Create a small canvas for the sprite
+			const spriteCanvas = document.createElement('canvas');
+			spriteCanvas.width = 64;
+			spriteCanvas.height = 64;
+			const sctx = spriteCanvas.getContext('2d')!;
+			// Outer glow ring
+			sctx.beginPath();
+			sctx.arc(32, 32, 24, 0, Math.PI * 2);
+			sctx.strokeStyle = color;
+			sctx.lineWidth = 2;
+			sctx.shadowColor = color;
+			sctx.shadowBlur = 12;
+			sctx.stroke();
+			sctx.shadowBlur = 0;
+			// Inner dot
+			sctx.beginPath();
+			sctx.arc(32, 32, 8, 0, Math.PI * 2);
+			sctx.fillStyle = color;
+			sctx.fill();
+
+			const spriteTex = new THREE.CanvasTexture(spriteCanvas);
+			const spriteMat = new THREE.SpriteMaterial({
+				map: spriteTex,
+				transparent: true,
+				depthTest: false,
+			});
+			const sprite = new THREE.Sprite(spriteMat);
+			sprite.scale.set(0.06, 0.06, 1);
+
+			// Convert lat/lng to 3D position on sphere surface
+			const phi = (90 - site.lat) * (Math.PI / 180);
+			const theta = (site.lng + 180) * (Math.PI / 180);
+			const r = 1.005; // slightly above surface
+			sprite.position.set(
+				-r * Math.sin(phi) * Math.cos(theta),
+				r * Math.cos(phi),
+				r * Math.sin(phi) * Math.sin(theta),
+			);
+			sprite.userData = { site };
+			markerGroup.add(sprite);
+		}
+
+		// Tooltip overlay
+		const tooltipEl = document.createElement('div');
+		tooltipEl.className = 'globe-tooltip';
+		tooltipEl.style.display = 'none';
+		globeContainer.appendChild(tooltipEl);
+
+		// Raycaster for hover
+		const raycaster = new THREE.Raycaster();
+		const mouse = new THREE.Vector2();
+
+		function onMouseMove(e: MouseEvent) {
+			const rect = renderer.domElement.getBoundingClientRect();
+			mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+			mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+			raycaster.setFromCamera(mouse, camera);
+			const hits = raycaster.intersectObjects(markerGroup.children);
+			if (hits.length > 0) {
+				const site = hits[0].object.userData.site as LunarSite;
+				tooltipEl.style.display = 'block';
+				tooltipEl.style.left = (e.clientX - rect.left + 12) + 'px';
+				tooltipEl.style.top = (e.clientY - rect.top - 8) + 'px';
+				const typeLabel = site.type.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase());
+				tooltipEl.innerHTML = `<strong style="color:${siteColors[site.type]}">${site.name}</strong><br><span style="opacity:0.7">${typeLabel} &middot; ${site.lat.toFixed(1)}°, ${site.lng.toFixed(1)}°</span>`;
+				renderer.domElement.style.cursor = 'pointer';
+			} else {
+				tooltipEl.style.display = 'none';
+				renderer.domElement.style.cursor = 'grab';
+			}
+		}
+		renderer.domElement.addEventListener('mousemove', onMouseMove);
+
+		// Orbit controls (manual — no import needed)
+		let isDragging = false;
+		let prevX = 0, prevY = 0;
+		let rotX = 0, rotY = 0; // accumulated rotation
+		let targetDistance = 3;
+		const MIN_DIST = 1.2;
+		const MAX_DIST = 6;
+
+		renderer.domElement.addEventListener('mousedown', (e) => {
+			isDragging = true;
+			prevX = e.clientX;
+			prevY = e.clientY;
+			renderer.domElement.style.cursor = 'grabbing';
+		});
+
+		window.addEventListener('mouseup', () => {
+			isDragging = false;
+			renderer.domElement.style.cursor = 'grab';
+		});
+
+		window.addEventListener('mousemove', (e) => {
+			if (!isDragging) return;
+			const dx = e.clientX - prevX;
+			const dy = e.clientY - prevY;
+			rotY += dx * 0.005;
+			rotX += dy * 0.005;
+			rotX = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, rotX));
+			prevX = e.clientX;
+			prevY = e.clientY;
+		});
+
+		renderer.domElement.addEventListener('wheel', (e) => {
+			e.preventDefault();
+			targetDistance *= e.deltaY > 0 ? 1.1 : 0.9;
+			targetDistance = Math.max(MIN_DIST, Math.min(MAX_DIST, targetDistance));
+		}, { passive: false });
+
+		// Handle resize
+		let rafId: number;
+		const ro = new ResizeObserver(() => {
+			if (destroyed) return;
+			const w = globeContainer.clientWidth;
+			const h = Math.max(globeContainer.clientHeight, 500);
+			camera.aspect = w / h;
+			camera.updateProjectionMatrix();
+			renderer.setSize(w, h);
+		});
+		ro.observe(globeContainer);
+
+		// Render loop
+		function animate() {
+			if (destroyed) return;
+			rafId = requestAnimationFrame(animate);
+
+			// Smooth camera orbit
+			const dist = camera.position.length();
+			const smoothDist = dist + (targetDistance - dist) * 0.1;
+			camera.position.set(
+				smoothDist * Math.cos(rotX) * Math.sin(rotY),
+				smoothDist * Math.sin(rotX),
+				smoothDist * Math.cos(rotX) * Math.cos(rotY),
+			);
+			camera.lookAt(0, 0, 0);
+
+			// Scale markers based on distance
+			const markerScale = 0.03 + (smoothDist - MIN_DIST) / (MAX_DIST - MIN_DIST) * 0.05;
+			for (const child of markerGroup.children) {
+				child.scale.set(markerScale, markerScale, 1);
+			}
+
+			renderer.render(scene, camera);
+		}
+		animate();
+
+		renderer.domElement.style.cursor = 'grab';
+
+		threeCleanup = () => {
+			destroyed = true;
+			cancelAnimationFrame(rafId);
+			ro.disconnect();
+			renderer.domElement.removeEventListener('mousemove', onMouseMove);
+			renderer.dispose();
+			geometry.dispose();
+			material.dispose();
+			if (material.map) material.map.dispose();
+			for (const child of markerGroup.children) {
+				if (child instanceof THREE.Sprite) {
+					child.material.map?.dispose();
+					child.material.dispose();
+				}
+			}
+			tooltipEl.remove();
+			if (globeContainer?.contains(renderer.domElement)) {
+				globeContainer.removeChild(renderer.domElement);
+			}
+			threeCleanup = null;
+		};
+	}
+
+	function destroyGlobe() {
+		if (threeCleanup) threeCleanup();
+	}
+
 	// --- Projection switching ---
 	async function switchProjection(proj: Projection) {
 		if (proj === activeProjection) return;
 		if (activeProjection === 'equirectangular') destroyLeaflet();
+		if (activeProjection === 'spherical') destroyGlobe();
 		activeProjection = proj;
 		await tick();
 		if (proj === 'equirectangular') await initLeaflet();
 		if (proj === 'polar') await drawPolarMaps();
+		if (proj === 'spherical') await initGlobe();
 	}
 
 	onMount(() => {
 		initLeaflet();
-		return () => destroyLeaflet();
+		return () => {
+			destroyLeaflet();
+			destroyGlobe();
+		};
 	});
 </script>
 
@@ -393,14 +673,7 @@
 			</div>
 		</div>
 	{:else}
-		<div class="spherical-placeholder">
-			<div class="sphere-visual">
-				<div class="sphere-circle"></div>
-				<div class="sphere-grid"></div>
-			</div>
-			<p class="text-sm text-[var(--color-text-dim)]">3D Spherical View</p>
-			<p class="text-xs text-[var(--color-text-dim)] opacity-60">Interactive WebGL globe — coming soon</p>
-		</div>
+		<div class="globe-container" bind:this={globeContainer}></div>
 	{/if}
 
 	<div class="map-footer">
@@ -516,41 +789,34 @@
 		font-family: monospace;
 	}
 
-	.spherical-placeholder {
+	.globe-container {
 		flex: 1;
-		min-height: 400px;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: 1rem;
-		border: 1px dashed var(--color-border);
+		min-height: 500px;
 		border-radius: 0.5rem;
-		background: var(--color-bg-panel);
-	}
-
-	.sphere-visual {
-		width: 200px;
-		height: 200px;
+		border: 1px solid var(--color-border);
+		overflow: hidden;
+		background: #0a0a0f;
 		position: relative;
 	}
 
-	.sphere-circle {
-		width: 100%;
-		height: 100%;
-		border-radius: 50%;
-		background: radial-gradient(circle at 35% 35%, #4a4a5a, #1a1a2a 60%, #0a0a15 100%);
-		border: 1px solid var(--color-border);
+	.globe-container :global(canvas) {
+		display: block;
+		width: 100% !important;
+		height: 100% !important;
 	}
 
-	.sphere-grid {
+	:global(.globe-tooltip) {
 		position: absolute;
-		inset: 0;
-		border-radius: 50%;
-		background:
-			repeating-conic-gradient(from 0deg, transparent 0deg, transparent 29deg, rgba(255,255,255,0.04) 29deg, rgba(255,255,255,0.04) 31deg);
-		mask-image: radial-gradient(circle, black 48%, transparent 50%);
-		-webkit-mask-image: radial-gradient(circle, black 48%, transparent 50%);
+		pointer-events: none;
+		background: rgba(10, 14, 23, 0.92);
+		border: 1px solid rgba(255,255,255,0.15);
+		padding: 6px 10px;
+		border-radius: 4px;
+		font-size: 0.75rem;
+		color: #e2e8f0;
+		white-space: nowrap;
+		z-index: 10;
+		box-shadow: 0 2px 12px rgba(0,0,0,0.5);
 	}
 
 	.map-footer {

@@ -272,6 +272,20 @@
 		return segments;
 	}
 
+	// Map MissionsTab short site names → EarthMap complex names
+	const SITE_ALIASES: Record<string, string> = {
+		'Kennedy Space Center':     'Kennedy Space Center (LC-39A)',
+		'Cape Canaveral SFS':       'Cape Canaveral SFS (SLC-40)',
+		'Vandenberg SFB':           'Vandenberg SFB (SLC-4E)',
+		'Boca Chica Starbase':      'Starbase Boca Chica',
+		'Kourou (CSG)':             'Guiana Space Centre',
+		'Baikonur':                 'Baikonur Cosmodrome',
+		'Wenchang':                 'Wenchang Space Launch Site',
+		'Satish Dhawan':            'Satish Dhawan Space Centre',
+		'Tanegashima':              'Xichang Satellite Launch Center',
+		'Wallops Island':           'Jiuquan Satellite Launch Center',
+	};
+
 	function drawOrbits(missions: ScheduledMissionMapData[]) {
 		if (!map || !leaflet) return;
 		// Clear existing orbit lines
@@ -280,9 +294,20 @@
 		if (!showPlannedMissions) return;
 
 		for (const m of missions) {
-			// Find launch site longitude for ascending node
-			const site = complexes.find(c => c.name === m.site);
-			const ascNode = site ? site.lng : 0;
+			// Find launch site using alias mapping
+			const resolvedName = SITE_ALIASES[m.site] ?? m.site;
+			const site = complexes.find(c => c.name === resolvedName || c.name.startsWith(m.site) || m.site.startsWith(c.name.split(' (')[0]));
+			const siteLat = site ? site.lat : 0;
+			const siteLng = site ? site.lng : 0;
+			// Compute ascending node longitude so the ground track passes through the site:
+			// For inc > |lat|: ascending slope passes through site
+			// For inc ≤ |lat|: peak passes through site (inc clamped to lat)
+			const inc = Math.max(0.1, Math.max(Math.abs(siteLat), m.inclination)) * Math.PI / 180;
+			const lat = Math.abs(siteLat) * Math.PI / 180;
+			const sinRatio = Math.min(1, Math.sin(lat) / Math.sin(inc));
+			const uCross = Math.asin(sinRatio); // argument of latitude where orbit crosses site latitude
+			const dLng = Math.atan2(Math.sin(uCross) * Math.cos(inc), Math.cos(uCross)) * 180 / Math.PI;
+			const ascNode = siteLng - dLng;
 			const segments = groundTrack(m.inclination, ascNode);
 			for (const seg of segments) {
 				const line = leaflet.polyline(seg, {
@@ -294,6 +319,33 @@
 				line.bindTooltip(m.name, { sticky: true, className: 'orbit-tooltip' });
 				orbitLayers.push(line);
 			}
+
+			// ── Launch ascent line: site → orbit insertion at 90° east ──
+			// Find where the ground track crosses longitude = siteLng + 90°
+			// Ground track: lng = ascNode + atan2(cos(i)*sin(u), cos(u))
+			// Solve for u at target longitude:
+			const targetLng = siteLng + 90;
+			const dLngRad = (targetLng - ascNode) * Math.PI / 180;
+			// tan(dLng) = cos(i)*tan(u)  →  u = atan(tan(dLng)/cos(i))
+			// Use atan2 for correct quadrant; we want the u in [0, 2π) closest east
+			const tanU = Math.tan(dLngRad) / Math.cos(inc);
+			// Base solution in (-π/2, π/2); pick the one in the upper half (0..π)
+			let uInsert = Math.atan(tanU);
+			// atan gives (-π/2, π/2); if dLng > 90° we need to add π
+			if (Math.cos(dLngRad) < 0) uInsert += Math.PI;
+			// Normalize to [0, 2π)
+			if (uInsert < 0) uInsert += 2 * Math.PI;
+
+			const insertLat = Math.asin(Math.sin(inc) * Math.sin(uInsert)) * 180 / Math.PI;
+			let insertLng = ascNode + Math.atan2(Math.cos(inc) * Math.sin(uInsert), Math.cos(uInsert)) * 180 / Math.PI;
+			insertLng = ((insertLng + 540) % 360) - 180;
+
+			const ascentLine = leaflet.polyline(
+				[[siteLat, siteLng], [insertLat, insertLng]],
+				{ color: '#eab308', weight: 1.5, dashArray: '6 4', opacity: 0.7 },
+			).addTo(map);
+			ascentLine.bindTooltip(`${m.name} ascent`, { sticky: true, className: 'orbit-tooltip' });
+			orbitLayers.push(ascentLine);
 		}
 	}
 

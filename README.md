@@ -6,7 +6,7 @@
 
 ## Premise
 
-Earth is one habitable world. Venus has a crushing 92-atmosphere CO₂ envelope and 460°C surface. Mars has a wisp of atmosphere at 0.6% of Earth's sea-level pressure. The solution: move most of Venus' atmosphere to Mars — reducing Venus to a livable pressure while giving Mars the mass it needs for a thick, warm atmosphere. The player orchestrates this megaproject across decades, optimizing mass transfer, energy budgets, orbital mechanics, atmospheric chemistry, and climate evolution to terraform two planets simultaneously at the lowest possible delta-v and energy cost in the shortest time.
+Earth is one habitable world. Venus has a crushing 92-atmosphere CO₂ envelope and 460°C surface. Mars has a wisp of atmosphere at 0.6% of Earth's sea-level pressure. The solution: move part of Venus' atmosphere to Mars — reducing Venus to a livable pressure while giving Mars the mass it needs for a thick, warm atmosphere, and precipiate out the rest. The player orchestrates this megaproject across decades, optimizing mass transfer, energy budgets, orbital mechanics, atmospheric chemistry, and climate evolution to terraform two planets simultaneously at the lowest possible delta-v and energy cost in the shortest time.
 
 ---
 

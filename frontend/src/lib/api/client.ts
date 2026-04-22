@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = `http://localhost:${import.meta.env.VITE_BACKEND_PORT ?? 8000}/api`;
 
 export async function apiGet<T>(path: string): Promise<T> {
 	const res = await fetch(`${API_BASE}${path}`);

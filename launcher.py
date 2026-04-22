@@ -4,6 +4,7 @@ Kills any running instances, sets up the venv, installs deps, and starts
 the FastAPI backend + SvelteKit frontend.
 """
 
+import argparse
 import subprocess
 import sys
 import os
@@ -27,14 +28,21 @@ else:
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def kill_existing():
+# ── default ports ────────────────────────────────────────────────────────────
+
+DEFAULT_BACKEND_PORT = 8000
+DEFAULT_FRONTEND_PORT = 5173
+
+
+def kill_existing(backend_port: int = DEFAULT_BACKEND_PORT,
+                  frontend_port: int = DEFAULT_FRONTEND_PORT):
     """Kill any running uvicorn or vite dev-server processes for this project."""
     print("[launcher] Stopping existing processes …")
 
     if sys.platform == "win32":
         # Kill anything on our ports first (most reliable)
-        _kill_port_windows(8000)
-        _kill_port_windows(5173)
+        _kill_port_windows(backend_port)
+        _kill_port_windows(frontend_port)
         # Also try by process name as fallback
         _kill_windows("uvicorn")
         _kill_windows("node", cwd_filter=str(FRONTEND_DIR))
@@ -171,52 +179,69 @@ def install_frontend():
         print("[launcher] Frontend node_modules already present.")
         return
     print("[launcher] Installing frontend dependencies …")
-    subprocess.run(["npm", "install"], cwd=str(FRONTEND_DIR), shell=True, timeout=120)
+    subprocess.run(["npm", "install"], cwd=str(FRONTEND_DIR), timeout=120)
 
 
-def start_backend():
+def start_backend(port: int = DEFAULT_BACKEND_PORT):
     """Start the FastAPI backend via uvicorn."""
-    print("[launcher] Starting backend on http://localhost:8000 …")
+    print(f"[launcher] Starting backend on http://localhost:{port} …")
     proc = subprocess.Popen(
         [str(PYTHON), "-m", "uvicorn", "app.main:app",
-         "--host", "0.0.0.0", "--port", "8000", "--reload"],
+         "--host", "0.0.0.0", "--port", str(port), "--reload"],
         cwd=str(BACKEND_DIR),
     )
     return proc
 
 
-def start_frontend():
+def start_frontend(port: int = DEFAULT_FRONTEND_PORT,
+                   backend_port: int = DEFAULT_BACKEND_PORT):
     """Start the SvelteKit frontend dev server."""
-    print("[launcher] Starting frontend on http://localhost:5173 …")
+    print(f"[launcher] Starting frontend on http://localhost:{port} …")
+    env = {**os.environ, "VITE_BACKEND_PORT": str(backend_port)}
     proc = subprocess.Popen(
-        ["npm", "run", "dev"],
+        ["npm", "run", "dev", "--", "--port", str(port)],
         cwd=str(FRONTEND_DIR),
-        shell=True,
+        env=env,
     )
     return proc
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="VenMars Tri-World Project Launcher")
+    parser.add_argument("-b", "--backend-port", type=int,
+                        default=DEFAULT_BACKEND_PORT,
+                        help=f"Backend (FastAPI) port (default: {DEFAULT_BACKEND_PORT})")
+    parser.add_argument("-p", "--frontend-port", type=int,
+                        default=DEFAULT_FRONTEND_PORT,
+                        help=f"Frontend (SvelteKit) port (default: {DEFAULT_FRONTEND_PORT})")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    bp = args.backend_port
+    fp = args.frontend_port
+
     print("=" * 60)
     print("  VenMars Tri-World Project — Launcher")
     print("=" * 60)
 
-    kill_existing()
+    kill_existing(backend_port=bp, frontend_port=fp)
     time.sleep(1)
     ensure_venv()
     install_requirements()
     install_frontend()
 
-    backend = start_backend()
+    backend = start_backend(port=bp)
     time.sleep(2)
-    frontend = start_frontend()
+    frontend = start_frontend(port=fp, backend_port=bp)
 
     print()
     print("[launcher] Both servers running. Press Ctrl+C to stop.")
-    print("  Backend:  http://localhost:8000")
-    print("  Frontend: http://localhost:5173")
+    print(f"  Backend:  http://localhost:{bp}")
+    print(f"  Frontend: http://localhost:{fp}")
     print()
 
     try:

@@ -2,9 +2,22 @@
 	import { gameScreen, gameState, difficulty, difficultyConfig } from '$lib/stores/gameStore';
 	import { apiPost } from '$lib/api/client';
 	import type { GameState, Difficulty } from '$lib/stores/gameStore';
+	import { onMount, onDestroy } from 'svelte';
 
 	let loading = $state(false);
 	let selectedDifficulty = $state<Difficulty>('medium');
+	let step = $state(0);
+	let timer: ReturnType<typeof setInterval>;
+
+	onMount(() => {
+		timer = setInterval(() => {
+			step += 1;
+		}, 4000);
+	});
+
+	onDestroy(() => {
+		clearInterval(timer);
+	});
 
 	async function startGame() {
 		loading = true;
@@ -25,6 +38,23 @@
 		medium: '#fbbf24',
 		hard: '#ef4444',
 	};
+
+	const planets = [
+		{ name: 'Venus', img: '/venus_terraformed.jpg', glow: 'rgba(245,158,11,0.5)', label: 'Terraformed Venus' },
+		{ name: 'Earth', img: '/earth_from_space.jpg', glow: 'rgba(59,130,246,0.5)', label: 'Earth' },
+		{ name: 'Mars', img: '/mars_terraformed.jpg', glow: 'rgba(239,68,68,0.5)', label: 'Terraformed Mars' },
+	];
+
+	/* Slot layout: center is big, left/right are smaller and offset */
+	const slots = [
+		{ x: 0,    scale: 1.0,  z: 3, y: 0  },   /* center */
+		{ x: 320,  scale: 0.55, z: 1, y: 20 },   /* right  */
+		{ x: -320, scale: 0.55, z: 1, y: 20 },   /* left   */
+	];
+
+	function getSlot(planetIndex: number) {
+		return slots[(planetIndex + step) % 3];
+	}
 </script>
 
 <div class="flex flex-col items-center justify-center min-h-screen relative overflow-hidden">
@@ -46,31 +76,23 @@
 		{/each}
 	</div>
 
-	<!-- Planets placeholder -->
-	<div class="relative z-10 flex items-center gap-12 mb-16">
-		<!-- Venus -->
-		<div class="flex flex-col items-center">
-			<div class="w-28 h-28 rounded-full bg-gradient-to-br from-amber-300 via-yellow-500 to-orange-600 shadow-[0_0_40px_rgba(245,158,11,0.4)] flex items-center justify-center">
-				<span class="text-xs font-bold text-amber-900/70">VENUS</span>
+	<!-- Rotating planet carousel -->
+	<div class="planet-carousel relative z-10 mb-12">
+		{#each planets as planet, i}
+			{@const slot = getSlot(i)}
+			<div
+				class="planet-item"
+				style="
+					transform: translateX({slot.x}px) translateY({slot.y}px) scale({slot.scale});
+					z-index: {slot.z};
+				"
+			>
+				<div class="planet-img-wrap" style="box-shadow: 0 0 50px 12px {planet.glow};">
+					<img src={planet.img} alt={planet.name} />
+				</div>
+				<p class="planet-label">{planet.label}</p>
 			</div>
-			<p class="text-[var(--color-accent-venus)] text-sm mt-3 font-medium">92 atm · 464°C</p>
-		</div>
-
-		<!-- Earth -->
-		<div class="flex flex-col items-center -mt-8">
-			<div class="w-36 h-36 rounded-full bg-gradient-to-br from-blue-400 via-green-400 to-blue-600 shadow-[0_0_50px_rgba(59,130,246,0.4)] flex items-center justify-center">
-				<span class="text-sm font-bold text-blue-100/80">EARTH</span>
-			</div>
-			<p class="text-[var(--color-accent-earth)] text-sm mt-3 font-medium">1.0 atm · 15°C</p>
-		</div>
-
-		<!-- Mars -->
-		<div class="flex flex-col items-center">
-			<div class="w-20 h-20 rounded-full bg-gradient-to-br from-red-400 via-red-600 to-red-800 shadow-[0_0_30px_rgba(239,68,68,0.3)] flex items-center justify-center">
-				<span class="text-xs font-bold text-red-200/70">MARS</span>
-			</div>
-			<p class="text-[var(--color-accent-mars)] text-sm mt-3 font-medium">0.006 atm · −63°C</p>
-		</div>
+		{/each}
 	</div>
 
 	<!-- Title -->
@@ -150,5 +172,47 @@
 	@keyframes twinkle {
 		0%, 100% { opacity: 0.3; }
 		50% { opacity: 1; }
+	}
+
+	.planet-carousel {
+		position: relative;
+		width: 800px;
+		height: 340px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.planet-item {
+		position: absolute;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		transition: transform 1.4s cubic-bezier(0.4, 0, 0.2, 1), z-index 0s 0.7s;
+	}
+
+	.planet-img-wrap {
+		width: 280px;
+		height: 280px;
+		border-radius: 50%;
+		overflow: hidden;
+		border: 2px solid rgba(255, 255, 255, 0.15);
+	}
+
+	.planet-img-wrap img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.planet-label {
+		margin-top: 10px;
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: var(--color-text-dim);
+		text-align: center;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
 	}
 </style>

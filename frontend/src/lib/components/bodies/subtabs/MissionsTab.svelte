@@ -5,7 +5,7 @@
 
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, reservedRockets, payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, reuseModeLabels, scheduledMissionsStore, type DeployMethod, type ReuseMode, type PayloadByOrbit } from '$lib/stores/gameStore';
+	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, reservedRockets, payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, reuseModeLabels, scheduledMissionsStore, registerMissionLaunch, gameTime, GAME_EPOCH, formatGameTimestamp, gameTimeToDate, type DeployMethod, type ReuseMode, type PayloadByOrbit } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -117,11 +117,21 @@
 
 	type MissionStatus = 'pending' | 'in-transit' | 'completed' | 'failed';
 
+	interface LaunchInstance {
+		launchNumber: number;           // 1-based sequence within the mission
+		scheduledHour: number;          // game-hours since epoch
+		scheduledDateStr: string;       // 'YYYY-MM-DD HH:MM' display string
+		status: MissionStatus;
+		costM: number;                  // per-launch cost in $M
+		deltaV: number;                 // per-launch ΔV in m/s
+	}
+
 	interface ScheduledMission extends SavedMission {
 		id: number;
 		status: MissionStatus;
 		totalDeltaV: number;
 		totalCost: number;
+		launches: LaunchInstance[];      // individual launch log (1 entry for one-off, N for repeating)
 	}
 
 	const FUEL_PACKING_EFFICIENCY = 0.80;
@@ -464,6 +474,32 @@
 	let completedMissions = $state<ScheduledMission[]>([]);
 	let nextMissionId = $state(1);
 
+	// Collapse state for mission launch rows (mission id → collapsed)
+	let collapsedMissions = $state<Set<number>>(new Set());
+
+	function toggleCollapse(missionId: number) {
+		if (collapsedMissions.has(missionId)) {
+			collapsedMissions = new Set([...collapsedMissions].filter(id => id !== missionId));
+		} else {
+			collapsedMissions = new Set([...collapsedMissions, missionId]);
+		}
+	}
+
+	// Generate launch date string from game-hour
+	function launchHourToDateStr(hour: number): string {
+		const d = gameTimeToDate(hour);
+		const yyyy = d.getUTCFullYear();
+		const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+		const dd = String(d.getUTCDate()).padStart(2, '0');
+		const hh = String(d.getUTCHours()).padStart(2, '0');
+		const min = String(d.getUTCMinutes()).padStart(2, '0');
+		return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+	}
+
+	// Number of initial launch instances to pre-generate for repeating missions
+	// (more will be generated as time passes)
+	const INITIAL_LAUNCH_BATCH = 20;
+
 	// Schedule
 	let missionMode = $state<'one-off' | 'repeating'>('one-off');
 	let launchDate = $state('2031-01-15');
@@ -498,6 +534,7 @@
 		scheduledMissions = _cache.scheduledMissions;
 		completedMissions = _cache.completedMissions;
 		nextMissionId = _cache.nextMissionId;
+		collapsedMissions = _cache.collapsedMissions ?? new Set();
 		missionMode = _cache.missionMode;
 		launchDate = _cache.launchDate;
 		launchTime = _cache.launchTime ?? '12:00';
@@ -527,6 +564,7 @@
 			scheduledMissions,
 			completedMissions,
 			nextMissionId,
+			collapsedMissions,
 			missionMode,
 			launchDate,
 			launchTime,
@@ -683,6 +721,39 @@
 	// ── Schedule / Cancel / Load Scheduled ────────────────
 	function scheduleMission() {
 		const name = missionName || autoGenerateName();
+
+		// Convert launch date/time to game-hours since epoch
+		const launchDateObj = new Date(`${launchDate}T${launchTime}:00Z`);
+		const firstLaunchHour = (launchDateObj.getTime() - GAME_EPOCH.getTime()) / 3_600_000;
+		const perLaunchCost = totalMissionCost;
+		const perLaunchDV = totalDeltaV;
+
+		// Generate launch instances
+		const launches: LaunchInstance[] = [];
+		if (missionMode === 'repeating') {
+			const intervalHours = repeatIntervalDays * 24;
+			for (let i = 0; i < INITIAL_LAUNCH_BATCH; i++) {
+				const hour = firstLaunchHour + i * intervalHours;
+				launches.push({
+					launchNumber: i + 1,
+					scheduledHour: hour,
+					scheduledDateStr: launchHourToDateStr(hour),
+					status: 'pending',
+					costM: perLaunchCost,
+					deltaV: perLaunchDV,
+				});
+			}
+		} else {
+			launches.push({
+				launchNumber: 1,
+				scheduledHour: firstLaunchHour,
+				scheduledDateStr: launchHourToDateStr(firstLaunchHour),
+				status: 'pending',
+				costM: perLaunchCost,
+				deltaV: perLaunchDV,
+			});
+		}
+
 		const scheduled: ScheduledMission = {
 			id: nextMissionId++,
 			name,
@@ -705,13 +776,24 @@
 			deployMethod: selectedDeployMethod,
 			reuseMode: selectedReuseMode,
 			status: 'pending',
-			totalDeltaV: totalDeltaV,
-			totalCost: totalMissionCost,
+			totalDeltaV: perLaunchDV,
+			totalCost: perLaunchCost,
+			launches,
 		};
 		scheduledMissions = [...scheduledMissions, scheduled];
 		// Reserve payloads and rocket
 		reservePayloadsForMission(scheduled.payloads);
 		if (scheduled.rocket) reserveRocketForMission(scheduled.rocket);
+
+		// Register mission cost with the spending engine
+		registerMissionLaunch(
+			name,
+			perLaunchCost,
+			firstLaunchHour,
+			missionMode === 'repeating',
+			repeatIntervalDays,
+		);
+
 		missionSubTab = 'scheduled';
 		newMission();
 	}
@@ -754,6 +836,100 @@
 		// Remove from scheduled since we're editing it
 		scheduledMissions = scheduledMissions.filter((_, i) => i !== index);
 		missionSubTab = 'designer';
+	}
+
+	// ── Launch status advancement (reactive on game time) ─────────
+	// Advance launch instance statuses based on current game time.
+	// pending → completed once scheduledHour is reached.
+	// For repeating missions, also generate more launch instances when
+	// we're running low on pending ones.
+	const TRANSIT_DURATION_HOURS = 0; // instant for now; future: calculate from orbit
+	const REPLENISH_THRESHOLD = 5;    // generate more when fewer than this remain pending
+
+	let currentGameHour = $derived($gameTime);
+
+	// Reactive effect: update launch statuses when game time changes
+	$effect(() => {
+		const now = currentGameHour;
+		let mutated = false;
+		for (const mission of scheduledMissions) {
+			for (const launch of mission.launches) {
+				if (launch.status === 'pending' && launch.scheduledHour <= now) {
+					launch.status = 'completed';
+					mutated = true;
+				}
+			}
+			// For repeating missions: generate more launches when running low
+			if (mission.mode === 'repeating') {
+				const pendingCount = mission.launches.filter(l => l.status === 'pending').length;
+				if (pendingCount < REPLENISH_THRESHOLD) {
+					const intervalHours = mission.repeatDays * 24;
+					const lastLaunch = mission.launches[mission.launches.length - 1];
+					const startNum = lastLaunch.launchNumber + 1;
+					const startHour = lastLaunch.scheduledHour + intervalHours;
+					for (let i = 0; i < INITIAL_LAUNCH_BATCH; i++) {
+						const hour = startHour + i * intervalHours;
+						mission.launches.push({
+							launchNumber: startNum + i,
+							scheduledHour: hour,
+							scheduledDateStr: launchHourToDateStr(hour),
+							status: 'pending',
+							costM: mission.totalCost,
+							deltaV: mission.totalDeltaV,
+						});
+					}
+					mutated = true;
+				}
+			}
+			// Update parent mission status based on launches
+			const allCompleted = mission.launches.every(l => l.status === 'completed' || l.status === 'failed');
+			const anyTransit = mission.launches.some(l => l.status === 'in-transit');
+			if (mission.mode === 'one-off' && allCompleted) {
+				mission.status = mission.launches.some(l => l.status === 'failed') ? 'failed' : 'completed';
+			} else if (anyTransit) {
+				mission.status = 'in-transit';
+			} else if (!allCompleted) {
+				mission.status = 'pending';
+			}
+		}
+		if (mutated) {
+			scheduledMissions = [...scheduledMissions]; // trigger reactivity
+		}
+	});
+
+	// ── Derived: missions with pending launches (for scheduled tab) ──
+	let activeMissions = $derived(
+		scheduledMissions.filter(m =>
+			m.mode === 'repeating' || m.launches.some(l => l.status === 'pending' || l.status === 'in-transit')
+		)
+	);
+
+	// ── Derived: missions where all launches are done (for completed tab) ──
+	// One-off missions move to completed when done.
+	// Repeating missions never "complete" — they stay in scheduled and show a history.
+	let fullyCompletedMissions = $derived(
+		scheduledMissions.filter(m =>
+			m.mode === 'one-off' &&
+			m.launches.length > 0 &&
+			m.launches.every(l => l.status === 'completed' || l.status === 'failed')
+		)
+	);
+
+	// Combined completed: explicitly completed + fully done scheduled
+	let allCompletedMissions = $derived([...completedMissions, ...fullyCompletedMissions]);
+
+	// ── Per-mission aggregates ────────────────────────────────────
+	function missionCompletedLaunches(m: ScheduledMission): LaunchInstance[] {
+		return m.launches.filter(l => l.status === 'completed' || l.status === 'failed');
+	}
+	function missionPendingLaunches(m: ScheduledMission): LaunchInstance[] {
+		return m.launches.filter(l => l.status === 'pending' || l.status === 'in-transit');
+	}
+	function missionTotalSpent(m: ScheduledMission): number {
+		return m.launches.filter(l => l.status === 'completed').reduce((s, l) => s + l.costM, 0);
+	}
+	function missionTotalDeltaV(m: ScheduledMission): number {
+		return m.launches.filter(l => l.status === 'completed').reduce((s, l) => s + l.deltaV, 0);
 	}
 
 	// ── Total ΔV ─────────────────────────────────────────
@@ -999,11 +1175,11 @@
 		</button>
 		<button class="mission-tab" class:active={missionSubTab === 'scheduled'} onclick={() => missionSubTab = 'scheduled'}>
 			📅 Scheduled
-			{#if scheduledMissions.length > 0}<span class="tab-badge">{scheduledMissions.length}</span>{/if}
+			{#if activeMissions.length > 0}<span class="tab-badge">{activeMissions.length}</span>{/if}
 		</button>
 		<button class="mission-tab" class:active={missionSubTab === 'completed'} onclick={() => missionSubTab = 'completed'}>
 			✅ Completed
-			{#if completedMissions.length > 0}<span class="tab-badge">{completedMissions.length}</span>{/if}
+			{#if allCompletedMissions.length > 0}<span class="tab-badge">{allCompletedMissions.length}</span>{/if}
 		</button>
 	</div>
 
@@ -1647,8 +1823,8 @@
 
 	<!-- Scheduled Missions Tab -->
 	<div class="tab-content">
-		<h4 class="tab-content-title">📅 Scheduled Missions ({scheduledMissions.length})</h4>
-		{#if scheduledMissions.length === 0}
+		<h4 class="tab-content-title">📅 Scheduled Missions ({activeMissions.length})</h4>
+		{#if activeMissions.length === 0}
 			<p class="empty-state">No missions scheduled yet. Use the Designer tab to create and schedule missions.</p>
 		{:else}
 			<div class="mission-table">
@@ -1656,34 +1832,97 @@
 					<span class="th th-name">Mission</span>
 					<span class="th th-vehicle">Vehicle</span>
 					<span class="th th-dest">Destination</span>
-					<span class="th th-date">Date</span>
+					<span class="th th-date">Next Launch</span>
 					<span class="th th-dv">ΔV</span>
 					<span class="th th-cost">Cost</span>
 					<span class="th th-status">Status</span>
 					<span class="th th-actions"></span>
 				</div>
-				{#each scheduledMissions as sm, i}
+				{#each activeMissions as sm, i}
 					{@const destInfo = destinations.find(d => d.body === sm.body)}
 					{@const orbitInfo = destInfo?.orbits.find(o => o.id === sm.orbitId)}
+					{@const completed = missionCompletedLaunches(sm)}
+					{@const pending = missionPendingLaunches(sm)}
+					{@const nextLaunch = pending[0]}
+					{@const spentTotal = missionTotalSpent(sm)}
+					{@const dvTotal = missionTotalDeltaV(sm)}
+					{@const isCollapsed = collapsedMissions.has(sm.id)}
+					{@const smIdx = scheduledMissions.indexOf(sm)}
+					<!-- Parent mission row -->
 					<div class="table-row" class:status-pending={sm.status === 'pending'} class:status-transit={sm.status === 'in-transit'}>
-						<span class="td td-name">{sm.name}</span>
+						<span class="td td-name">
+							{#if sm.launches.length > 1}
+								<button class="collapse-btn" onclick={() => toggleCollapse(sm.id)} title={isCollapsed ? 'Expand launches' : 'Collapse launches'}>
+									{isCollapsed ? '▶' : '▼'}
+								</button>
+							{/if}
+							{sm.name}
+							{#if sm.mode === 'repeating'}
+								<span class="repeat-badge">🔁 Every {sm.repeatDays}d</span>
+							{/if}
+						</span>
 						<span class="td td-vehicle">{sm.rocket || '—'}</span>
 						<span class="td td-dest">{destInfo?.icon ?? ''} {orbitInfo?.name?.split('(')[0]?.trim() ?? sm.orbitId}</span>
-						<span class="td td-date">{sm.date} {sm.time ?? ''}</span>
-						<span class="td td-dv">{sm.totalDeltaV.toFixed(0)} m/s</span>
-						<span class="td td-cost">${sm.totalCost.toLocaleString()}M</span>
+						<span class="td td-date">{nextLaunch?.scheduledDateStr ?? '—'}</span>
+						<span class="td td-dv">
+							<span class="aggregate-line">{sm.totalDeltaV.toFixed(0)} m/s</span>
+							{#if completed.length > 0}
+								<span class="aggregate-sub">Σ {dvTotal.toFixed(0)} m/s ({completed.length} launches)</span>
+							{/if}
+						</span>
+						<span class="td td-cost">
+							<span class="aggregate-line">${sm.totalCost.toLocaleString()}M / launch</span>
+							{#if completed.length > 0}
+								<span class="aggregate-sub">Σ ${spentTotal.toLocaleString()}M total</span>
+							{/if}
+						</span>
 						<span class="td td-status">
-							{#if sm.status === 'pending'}
+							{#if sm.mode === 'repeating'}
+								<span class="status-badge pending">🔁 {completed.length} / ∞</span>
+							{:else if sm.status === 'pending'}
 								<span class="status-badge pending">⏳ Pending</span>
 							{:else if sm.status === 'in-transit'}
 								<span class="status-badge transit">🚀 In Transit</span>
 							{/if}
 						</span>
 						<span class="td td-actions">
-							<button class="act-btn" onclick={() => loadScheduledToDesigner(i)} title="Edit in Designer">✏️</button>
-							<button class="act-btn act-remove" onclick={() => cancelScheduledMission(i)} title="Cancel Mission">✕</button>
+							<button class="act-btn" onclick={() => loadScheduledToDesigner(smIdx)} title="Edit in Designer">✏️</button>
+							<button class="act-btn act-remove" onclick={() => cancelScheduledMission(smIdx)} title="Cancel Mission">✕</button>
 						</span>
 					</div>
+					<!-- Indented individual launch rows (collapsible) -->
+					{#if !isCollapsed && sm.launches.length > 1}
+						{#each sm.launches as launch}
+							<div class="table-row launch-row"
+								class:status-complete={launch.status === 'completed'}
+								class:status-pending={launch.status === 'pending'}
+								class:status-transit={launch.status === 'in-transit'}
+								class:status-failed={launch.status === 'failed'}
+							>
+								<span class="td td-name launch-indent">
+									<span class="launch-connector">└</span>
+									Launch #{launch.launchNumber}
+								</span>
+								<span class="td td-vehicle">—</span>
+								<span class="td td-dest">—</span>
+								<span class="td td-date">{launch.scheduledDateStr}</span>
+								<span class="td td-dv">{launch.deltaV.toFixed(0)} m/s</span>
+								<span class="td td-cost">${launch.costM.toLocaleString()}M</span>
+								<span class="td td-status">
+									{#if launch.status === 'completed'}
+										<span class="status-badge complete">✅ Done</span>
+									{:else if launch.status === 'pending'}
+										<span class="status-badge pending">⏳</span>
+									{:else if launch.status === 'in-transit'}
+										<span class="status-badge transit">🚀</span>
+									{:else if launch.status === 'failed'}
+										<span class="status-badge failed">❌</span>
+									{/if}
+								</span>
+								<span class="td td-actions"></span>
+							</div>
+						{/each}
+					{/if}
 				{/each}
 			</div>
 		{/if}
@@ -1693,8 +1932,8 @@
 
 	<!-- Completed Missions Tab -->
 	<div class="tab-content">
-		<h4 class="tab-content-title">✅ Completed Missions ({completedMissions.length})</h4>
-		{#if completedMissions.length === 0}
+		<h4 class="tab-content-title">✅ Completed Missions ({allCompletedMissions.length})</h4>
+		{#if allCompletedMissions.length === 0}
 			<p class="empty-state">No completed missions yet. Missions will appear here after they reach their destination.</p>
 		{:else}
 			<div class="mission-table">
@@ -1707,24 +1946,72 @@
 					<span class="th th-cost">Cost</span>
 					<span class="th th-status">Status</span>
 				</div>
-				{#each completedMissions as cm}
+				{#each allCompletedMissions as cm}
 					{@const destInfo = destinations.find(d => d.body === cm.body)}
 					{@const orbitInfo = destInfo?.orbits.find(o => o.id === cm.orbitId)}
+					{@const completed = missionCompletedLaunches(cm)}
+					{@const spentTotal = missionTotalSpent(cm)}
+					{@const dvTotal = missionTotalDeltaV(cm)}
+					{@const isCollapsed = collapsedMissions.has(cm.id)}
+					<!-- Parent mission row -->
 					<div class="table-row status-complete">
-						<span class="td td-name">{cm.name}</span>
+						<span class="td td-name">
+							{#if cm.launches.length > 1}
+								<button class="collapse-btn" onclick={() => toggleCollapse(cm.id)} title={isCollapsed ? 'Expand launches' : 'Collapse launches'}>
+									{isCollapsed ? '▶' : '▼'}
+								</button>
+							{/if}
+							{cm.name}
+						</span>
 						<span class="td td-vehicle">{cm.rocket || '—'}</span>
 						<span class="td td-dest">{destInfo?.icon ?? ''} {orbitInfo?.name?.split('(')[0]?.trim() ?? cm.orbitId}</span>
 						<span class="td td-date">{cm.date} {cm.time ?? ''}</span>
-						<span class="td td-dv">{cm.totalDeltaV.toFixed(0)} m/s</span>
-						<span class="td td-cost">${cm.totalCost.toLocaleString()}M</span>
+						<span class="td td-dv">
+							<span class="aggregate-line">Σ {dvTotal.toFixed(0)} m/s</span>
+							{#if completed.length > 1}
+								<span class="aggregate-sub">{completed.length} launches</span>
+							{/if}
+						</span>
+						<span class="td td-cost">
+							<span class="aggregate-line">Σ ${spentTotal.toLocaleString()}M</span>
+							{#if completed.length > 1}
+								<span class="aggregate-sub">${cm.totalCost.toLocaleString()}M each</span>
+							{/if}
+						</span>
 						<span class="td td-status">
-							{#if cm.status === 'completed'}
+							{#if cm.launches.some(l => l.status === 'failed')}
+								<span class="status-badge failed">❌ {completed.filter(l => l.status === 'failed').length} Failed</span>
+							{:else}
 								<span class="status-badge complete">✅ Complete</span>
-							{:else if cm.status === 'failed'}
-								<span class="status-badge failed">❌ Failed</span>
 							{/if}
 						</span>
 					</div>
+					<!-- Indented launch rows -->
+					{#if !isCollapsed && cm.launches.length > 1}
+						{#each cm.launches as launch}
+							<div class="table-row launch-row"
+								class:status-complete={launch.status === 'completed'}
+								class:status-failed={launch.status === 'failed'}
+							>
+								<span class="td td-name launch-indent">
+									<span class="launch-connector">└</span>
+									Launch #{launch.launchNumber}
+								</span>
+								<span class="td td-vehicle">—</span>
+								<span class="td td-dest">—</span>
+								<span class="td td-date">{launch.scheduledDateStr}</span>
+								<span class="td td-dv">{launch.deltaV.toFixed(0)} m/s</span>
+								<span class="td td-cost">${launch.costM.toLocaleString()}M</span>
+								<span class="td td-status">
+									{#if launch.status === 'completed'}
+										<span class="status-badge complete">✅</span>
+									{:else if launch.status === 'failed'}
+										<span class="status-badge failed">❌</span>
+									{/if}
+								</span>
+							</div>
+						{/each}
+					{/if}
 				{/each}
 			</div>
 		{/if}
@@ -2557,4 +2844,69 @@
 		color: #f87171;
 		border: 1px solid rgba(239, 68, 68, 0.25);
 	}
+
+	/* Collapse button */
+	.collapse-btn {
+		background: none;
+		border: none;
+		color: var(--color-text-dim);
+		cursor: pointer;
+		font-size: 0.5rem;
+		padding: 0 0.2rem;
+		margin-right: 0.2rem;
+		opacity: 0.7;
+		transition: opacity 0.1s;
+	}
+	.collapse-btn:hover { opacity: 1; }
+
+	/* Indented launch rows */
+	.launch-row {
+		background: rgba(99, 102, 241, 0.015) !important;
+	}
+	.launch-row:hover {
+		background: rgba(99, 102, 241, 0.04) !important;
+	}
+	.launch-indent {
+		padding-left: 1.2rem !important;
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+	.launch-connector {
+		color: var(--color-border);
+		font-size: 0.6rem;
+		font-family: monospace;
+		opacity: 0.5;
+	}
+
+	/* Repeat badge */
+	.repeat-badge {
+		display: inline-flex;
+		align-items: center;
+		font-size: 0.5rem;
+		font-weight: 600;
+		color: #818cf8;
+		background: rgba(129, 140, 248, 0.1);
+		border: 1px solid rgba(129, 140, 248, 0.2);
+		border-radius: 999px;
+		padding: 0.05rem 0.35rem;
+		margin-left: 0.3rem;
+		white-space: nowrap;
+	}
+
+	/* Aggregate lines (per-launch + total) */
+	.aggregate-line {
+		display: block;
+		line-height: 1.2;
+	}
+	.aggregate-sub {
+		display: block;
+		font-size: 0.5rem;
+		font-weight: 400;
+		opacity: 0.6;
+		line-height: 1.2;
+	}
+
+	/* Failed launch row highlight */
+	.table-row.status-failed { background: rgba(239, 68, 68, 0.03); }
 </style>

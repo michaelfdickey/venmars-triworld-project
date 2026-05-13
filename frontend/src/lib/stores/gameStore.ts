@@ -909,6 +909,293 @@ export function tickMaterials(deltaHours: number, allocations: number[]): void {
 	});
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ██  REAL-TIME SPENDING ENGINE                                      ██
+// ══════════════════════════════════════════════════════════════════════
+//
+// Cash flows in real time, synchronized with the game clock:
+//
+//   INCOME:
+//     • Annual budget arrives as monthly installments (1/12 per month)
+//     • Deposited on the 1st of each game-month
+//
+//   CONTINUOUS OUTFLOWS (prorated per frame):
+//     • Spending category allocations (11 categories, annualized → per-hour)
+//     • Material procurement costs (based on allocation %)
+//
+//   RECURRING OUTFLOWS (triggered at specific game-times):
+//     • Launch complex maintenance: annual, on anniversary of claim date
+//     • Rocket maintenance: annual, on anniversary of purchase date
+//     • Scheduled mission launches: per-launch cost deducted at launch time
+//     • Repeating missions: launch cost deducted every N days
+//     • Annual maintenance for assets: deducted on anniversary of commitment
+//
+//   The `tickSpending()` function is called every frame alongside
+//   `tickMaterials()`. It checks whether the game clock has crossed
+//   any trigger boundaries and applies deductions accordingly.
+//
+// ──────────────────────────────────────────────────────────────────────
+
+const HOURS_PER_YEAR = 8766;    // 365.25 × 24
+const HOURS_PER_MONTH = 730.5;  // 8766 / 12
+const HOURS_PER_DAY = 24;
+
+// ── Cash balance (in $M) ──────────────────────────────────────────
+// Starts with initial reserves × $1B (converted to $M) plus first month's budget.
+// All costs in the game are in $M for consistency with rocket/mission costs.
+export const cashBalanceM = writable<number>(320_000); // $320B in $M = 320,000
+
+// ── Recurring expenditure commitments ─────────────────────────────
+export type ExpenditureFrequency = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'annual' | 'one-time';
+
+export interface RecurringExpenditure {
+	id: string;
+	label: string;                  // human-readable description
+	category: string;               // spending category name for grouping
+	amountM: number;                // cost in $M per occurrence
+	frequency: ExpenditureFrequency;
+	commitDateHour: number;         // game-hour when this commitment was made (epoch-relative)
+	nextDueHour: number;            // next game-hour when this cost triggers
+	enabled: boolean;
+	sourceType: 'complex' | 'rocket' | 'mission-launch' | 'mission-repeat' | 'annual-maint' | 'custom';
+	sourceId: string;               // links back to the originating asset/mission
+	repeatIntervalHours: number;    // custom repeat interval in hours (for mission-repeat with arbitrary N-day cycles)
+}
+
+export const recurringExpenditures = writable<RecurringExpenditure[]>([]);
+
+// ── Spending log (recent deductions for UI display) ───────────────
+export interface SpendingLogEntry {
+	gameHour: number;               // when the deduction occurred
+	label: string;
+	amountM: number;                // positive = deduction
+	balanceAfterM: number;          // balance after this deduction
+	category: string;
+}
+
+// Keep last 200 entries to avoid unbounded growth
+const MAX_LOG_ENTRIES = 200;
+export const spendingLog = writable<SpendingLogEntry[]>([]);
+
+function logDeduction(gameHour: number, label: string, amountM: number, balanceAfterM: number, category: string) {
+	spendingLog.update(log => {
+		const next = [...log, { gameHour, label, amountM, balanceAfterM, category }];
+		return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next;
+	});
+}
+
+// ── Helper: compute the next due hour for a given frequency ───────
+function advanceDueHour(currentDue: number, frequency: ExpenditureFrequency, commitHour: number): number {
+	switch (frequency) {
+		case 'hourly':  return currentDue + 1;
+		case 'daily':   return currentDue + HOURS_PER_DAY;
+		case 'weekly':  return currentDue + HOURS_PER_DAY * 7;
+		case 'monthly': return currentDue + HOURS_PER_MONTH;
+		case 'annual':  return currentDue + HOURS_PER_YEAR;
+		case 'one-time': return Infinity; // never recurs
+		default: return currentDue + HOURS_PER_YEAR;
+	}
+}
+
+// ── Continuous spending rate (annualized $M/hr) ───────────────────
+// Sums all 11 spending category allocations ($B/yr → $M/hr).
+// This covers the baseline operational burn rate.
+function continuousSpendRateMPerHour(allocations: number[]): number {
+	let totalB = 0;
+	for (const b of allocations) totalB += b;
+	// Convert $B/yr → $M/hr:  totalB * 1000 / HOURS_PER_YEAR
+	return (totalB * 1000) / HOURS_PER_YEAR;
+}
+
+// ── Budget income tracking ────────────────────────────────────────
+// Tracks the last game-month in which budget income was deposited.
+// Budget income = annualBudget / 12, deposited on the 1st of each month.
+let lastIncomeMonth = -1; // month index (0 = Jan 2030, 1 = Feb 2030, etc.)
+
+function gameHourToMonthIndex(hour: number): number {
+	return Math.floor(hour / HOURS_PER_MONTH);
+}
+
+// ── Master tick function ──────────────────────────────────────────
+// Called every frame from the game loop. Handles:
+//   1. Monthly budget income deposits
+//   2. Continuous operational spending (prorated)
+//   3. Triggered recurring expenditures (missions, maintenance, etc.)
+export function tickSpending(
+	prevHour: number,
+	newHour: number,
+	spendingAllocations: number[],
+	annualBudgetB: number,
+): void {
+	if (newHour <= prevHour) return;
+
+	const deltaHours = newHour - prevHour;
+	let currentBalance = 0;
+	const unsub = cashBalanceM.subscribe(v => { currentBalance = v; });
+	unsub();
+
+	// 1. Monthly budget income
+	const prevMonth = gameHourToMonthIndex(prevHour);
+	const newMonth = gameHourToMonthIndex(newHour);
+	if (newMonth > prevMonth || (prevHour === 0 && lastIncomeMonth < 0)) {
+		const monthsToDeposit = lastIncomeMonth < 0
+			? newMonth + 1  // first tick: deposit for all elapsed months
+			: newMonth - Math.max(lastIncomeMonth, prevMonth);
+		if (monthsToDeposit > 0) {
+			const monthlyIncomeM = (annualBudgetB * 1000) / 12;
+			const deposit = monthlyIncomeM * monthsToDeposit;
+			currentBalance += deposit;
+			logDeduction(newHour, `Budget deposit (${monthsToDeposit} mo)`, -deposit, currentBalance, 'Income');
+			lastIncomeMonth = newMonth;
+		}
+	}
+
+	// 2. Continuous operational spending (allocations burn rate)
+	const burnRateM = continuousSpendRateMPerHour(spendingAllocations);
+	if (burnRateM > 0) {
+		const spent = burnRateM * deltaHours;
+		currentBalance -= spent;
+		// Don't log every frame — too noisy. Logged via summary in the spending tab.
+	}
+
+	// 3. Triggered recurring expenditures
+	recurringExpenditures.update(expenditures => {
+		for (const exp of expenditures) {
+			if (!exp.enabled) continue;
+			// Fire all due events that fall within [prevHour, newHour)
+			let safety = 0;
+			while (exp.nextDueHour <= newHour && safety < 1000) {
+				safety++;
+				currentBalance -= exp.amountM;
+				logDeduction(exp.nextDueHour, exp.label, exp.amountM, currentBalance, exp.category);
+				if (exp.frequency === 'one-time') {
+					exp.enabled = false;
+					break;
+				}
+				// Mission-repeat with custom interval: use repeatIntervalHours
+				if (exp.sourceType === 'mission-repeat' && exp.repeatIntervalHours > 0) {
+					exp.nextDueHour += exp.repeatIntervalHours;
+				} else {
+					exp.nextDueHour = advanceDueHour(exp.nextDueHour, exp.frequency, exp.commitDateHour);
+				}
+			}
+		}
+		return expenditures;
+	});
+
+	cashBalanceM.set(currentBalance);
+}
+
+// ── Convenience: register a new recurring expenditure ─────────────
+export function addExpenditure(exp: Omit<RecurringExpenditure, 'id'>) {
+	const id = `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	recurringExpenditures.update(list => [...list, { ...exp, id }]);
+	return id;
+}
+
+export function removeExpenditure(id: string) {
+	recurringExpenditures.update(list => list.filter(e => e.id !== id));
+}
+
+// ── Convenience: register complex claim as recurring maintenance ──
+export function registerComplexMaintenance(complexId: string, claimHour: number) {
+	const profile = launchComplexProfiles[complexId];
+	if (!profile) return;
+	addExpenditure({
+		label: `${profile.name} annual maintenance`,
+		category: 'Launch Infrastructure',
+		amountM: profile.idle.costM,
+		frequency: 'annual',
+		commitDateHour: claimHour,
+		nextDueHour: claimHour + HOURS_PER_YEAR, // first charge 1 year after claim
+		enabled: true,
+		sourceType: 'complex',
+		sourceId: complexId,
+		repeatIntervalHours: 0,
+	});
+}
+
+// ── Convenience: register rocket purchase as recurring maintenance ─
+export function registerRocketMaintenance(rocketId: string, purchaseHour: number) {
+	const rocket = rocketDefs.find(r => r.id === rocketId);
+	if (!rocket) return;
+	addExpenditure({
+		label: `${rocket.name} annual maintenance`,
+		category: 'Rocket Manufacturing',
+		amountM: rocket.maintenanceCostM,
+		frequency: 'annual',
+		commitDateHour: purchaseHour,
+		nextDueHour: purchaseHour + HOURS_PER_YEAR,
+		enabled: true,
+		sourceType: 'rocket',
+		sourceId: rocketId,
+		repeatIntervalHours: 0,
+	});
+}
+
+// ── Convenience: register a scheduled mission launch cost ─────────
+export function registerMissionLaunch(
+	missionName: string,
+	costPerLaunchM: number,
+	launchHour: number,
+	repeating: boolean,
+	repeatDays: number,
+) {
+	if (repeating) {
+		// Repeating mission: fires at launchHour, then every repeatDays × 24 hours
+		addExpenditure({
+			label: `Mission launch: ${missionName}`,
+			category: 'Mission Operations',
+			amountM: costPerLaunchM,
+			frequency: 'daily', // overridden by repeatIntervalHours
+			commitDateHour: launchHour,
+			nextDueHour: launchHour,
+			enabled: true,
+			sourceType: 'mission-repeat',
+			sourceId: missionName,
+			repeatIntervalHours: repeatDays * HOURS_PER_DAY,
+		});
+	} else {
+		// One-time mission: fires once at launchHour
+		addExpenditure({
+			label: `Mission launch: ${missionName}`,
+			category: 'Mission Operations',
+			amountM: costPerLaunchM,
+			frequency: 'one-time',
+			commitDateHour: launchHour,
+			nextDueHour: launchHour,
+			enabled: true,
+			sourceType: 'mission-launch',
+			sourceId: missionName,
+			repeatIntervalHours: 0,
+		});
+	}
+}
+
+// ── Convenience: register an annual maintenance cost ──────────────
+// For any asset with an annual upkeep (e.g. bought a rocket + launch pad on July 11th,
+// every July 11th the annual cost is deducted).
+export function registerAnnualMaintenance(
+	label: string,
+	category: string,
+	annualCostM: number,
+	commitHour: number,
+	sourceId: string,
+) {
+	addExpenditure({
+		label,
+		category,
+		amountM: annualCostM,
+		frequency: 'annual',
+		commitDateHour: commitHour,
+		nextDueHour: commitHour + HOURS_PER_YEAR,
+		enabled: true,
+		sourceType: 'annual-maint',
+		sourceId,
+		repeatIntervalHours: 0,
+	});
+}
+
 // ── Payload & Satellite definitions ────────────────────────────────
 export type PayloadCategory = 'comms' | 'weather' | 'nav' | 'science' | 'imaging' | 'relay'
 	| 'infrastructure' | 'habitat' | 'vehicle' | 'supply' | 'fuel'

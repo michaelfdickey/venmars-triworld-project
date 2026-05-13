@@ -1,11 +1,20 @@
 <script lang="ts">
-	import { gameState, gameTime, simSpeedIndex, paused, speedPresets, formatGameTimestamp } from '$lib/stores/gameStore';
+	import { gameState, gameTime, simSpeedIndex, paused, speedPresets, formatGameTimestamp, cashBalanceM } from '$lib/stores/gameStore';
 
 	let gameStateVal = $derived($gameState);
 	let timestamp = $derived(formatGameTimestamp($gameTime));
 	let currentPreset = $derived(speedPresets[$simSpeedIndex]);
 	let isPaused = $derived($paused);
 	let dropdownOpen = $state(false);
+
+	// Format cash balance for display
+	let cashDisplay = $derived.by(() => {
+		const m = $cashBalanceM;
+		if (Math.abs(m) >= 1_000_000) return `$${(m / 1_000_000).toFixed(2)}T`;
+		if (Math.abs(m) >= 1_000) return `$${(m / 1_000).toFixed(1)}B`;
+		return `$${m.toFixed(0)}M`;
+	});
+	let cashNegative = $derived($cashBalanceM < 0);
 
 	function togglePause() {
 		$paused = !$paused;
@@ -35,6 +44,9 @@
 	<div class="status-left">
 		<span class="status-brand">VenMars</span>
 		<span class="status-clock">{timestamp}</span>
+		<span class="status-cash" class:negative={cashNegative} title="Program cash balance">
+			💰 {cashDisplay}
+		</span>
 	</div>
 
 	<div class="status-right">
@@ -125,6 +137,18 @@
 		font-weight: 600;
 		color: var(--color-text);
 		letter-spacing: 0.04em;
+	}
+
+	.status-cash {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: #4ade80;
+		letter-spacing: 0.02em;
+	}
+
+	.status-cash.negative {
+		color: #f87171;
 	}
 
 	.status-right {

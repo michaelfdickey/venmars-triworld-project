@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { activeTab, gameState, gameTime, simSpeed, materialAllocations, tickMaterials } from '$lib/stores/gameStore';
+	import { activeTab, gameState, gameTime, simSpeed, materialAllocations, tickMaterials, tickSpending, spendingAllocations, difficulty, difficultyConfig } from '$lib/stores/gameStore';
 	import TabBar from './TabBar.svelte';
 	import BodyPanel from './bodies/BodyPanel.svelte';
 	import SettingsPanel from './SettingsPanel.svelte';
@@ -19,9 +19,15 @@
 	let lastTime = 0;
 	let currentSpeed = 0;
 	let currentAllocations: number[] = [];
+	let currentSpendingAllocations: number[] = [];
+	let currentAnnualBudgetB = 1060;
+	let prevGameHour = 0;
 
 	const unsub = simSpeed.subscribe(v => { currentSpeed = v; });
 	const unsubAlloc = materialAllocations.subscribe(v => { currentAllocations = v; });
+	const unsubSpend = spendingAllocations.subscribe(v => { currentSpendingAllocations = v; });
+	const unsubDiff = difficulty.subscribe(d => { currentAnnualBudgetB = difficultyConfig[d].annualBudgetB; });
+	const unsubTime = gameTime.subscribe(v => { prevGameHour = v; });
 
 	onMount(() => {
 		lastTime = performance.now();
@@ -33,8 +39,11 @@
 			if (currentSpeed > 0) {
 				const dtSeconds = dtMs / 1000;
 				const deltaHours = currentSpeed * dtSeconds;
-				gameTime.update(t => t + deltaHours);
+				const oldHour = prevGameHour;
+				const newHour = oldHour + deltaHours;
+				gameTime.set(newHour);
 				tickMaterials(deltaHours, currentAllocations);
+				tickSpending(oldHour, newHour, currentSpendingAllocations, currentAnnualBudgetB);
 			}
 
 			rafId = requestAnimationFrame(loop);
@@ -46,6 +55,9 @@
 			cancelAnimationFrame(rafId);
 			unsub();
 			unsubAlloc();
+			unsubSpend();
+			unsubDiff();
+			unsubTime();
 		};
 	});
 </script>

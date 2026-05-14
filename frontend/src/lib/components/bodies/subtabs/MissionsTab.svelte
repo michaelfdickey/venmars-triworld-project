@@ -4,8 +4,9 @@
 </script>
 
 <script lang="ts">
-	import { onDestroy } from 'svelte';
-	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, reservedRockets, payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, reuseModeLabels, scheduledMissionsStore, registerMissionLaunch, gameTime, GAME_EPOCH, formatGameTimestamp, gameTimeToDate, type DeployMethod, type ReuseMode, type PayloadByOrbit } from '$lib/stores/gameStore';
+	import { onDestroy, untrack } from 'svelte';
+	import { get } from 'svelte/store';
+	import { claimedComplexes, launchComplexCosts, rocketDefs, rocketInventory, reservedRockets, payloadInventory, reservedPayloads, marketSatellites, venMarsPayloads, customPayloads, reuseModeLabels, scheduledMissionsStore, deployedSatellites, registerMissionLaunch, gameTime, GAME_EPOCH, formatGameTimestamp, gameTimeToDate, type DeployMethod, type ReuseMode, type PayloadByOrbit } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -109,13 +110,14 @@
 		date: string;
 		time: string;
 		repeatDays: number;
+		totalLaunches: number;  // for repeating: total launches planned (0 = unlimited)
 		activities: MissionActivity[];
 		launchWindow: LaunchWindow;
 		deployMethod: DeployMethod;
 		reuseMode: ReuseMode;
 	}
 
-	type MissionStatus = 'pending' | 'in-transit' | 'completed' | 'failed';
+	type MissionStatus = 'pending' | 'in-transit' | 'completed' | 'failed' | 'paused';
 
 	interface LaunchInstance {
 		launchNumber: number;           // 1-based sequence within the mission
@@ -124,6 +126,7 @@
 		status: MissionStatus;
 		costM: number;                  // per-launch cost in $M
 		deltaV: number;                 // per-launch ΔV in m/s
+		consumed?: boolean;             // true once payloads have been deducted for this launch
 	}
 
 	interface ScheduledMission extends SavedMission {
@@ -505,6 +508,7 @@
 	let launchDate = $state('2031-01-15');
 	let launchTime = $state('12:00');
 	let repeatIntervalDays = $state(30);
+	let repeatTotalLaunches = $state(10);
 	let launchWindow = $state<LaunchWindow>('next-optimal');
 
 	// Activities & deployment
@@ -539,6 +543,7 @@
 		launchDate = _cache.launchDate;
 		launchTime = _cache.launchTime ?? '12:00';
 		repeatIntervalDays = _cache.repeatIntervalDays;
+		repeatTotalLaunches = _cache.repeatTotalLaunches ?? 10;
 		launchWindow = _cache.launchWindow;
 		missionActivities = _cache.missionActivities;
 		selectedDeployMethod = _cache.selectedDeployMethod;
@@ -569,6 +574,7 @@
 			launchDate,
 			launchTime,
 			repeatIntervalDays,
+			repeatTotalLaunches,
 			launchWindow,
 			missionActivities,
 			selectedDeployMethod,
@@ -603,6 +609,7 @@
 			date: launchDate,
 			time: launchTime,
 			repeatDays: repeatIntervalDays,
+			totalLaunches: missionMode === 'repeating' ? repeatTotalLaunches : 1,
 			activities: missionActivities.map(a => ({ ...a })),
 			launchWindow,
 			deployMethod: selectedDeployMethod,
@@ -636,6 +643,7 @@
 		launchDate = m.date;
 		launchTime = m.time ?? '12:00';
 		repeatIntervalDays = m.repeatDays;
+		repeatTotalLaunches = m.totalLaunches || 10;
 		missionActivities = m.activities.map(a => ({ ...a }));
 		launchWindow = m.launchWindow;
 		selectedDeployMethod = m.deployMethod;
@@ -666,6 +674,7 @@
 		launchDate = '2031-01-15';
 		launchTime = '12:00';
 		repeatIntervalDays = 30;
+		repeatTotalLaunches = 10;
 		missionActivities = [
 			{ type: 'launch-to-orbit', notes: '' },
 			{ type: 'circularize', notes: '' },
@@ -677,7 +686,7 @@
 
 	// ── Payload name → ID mapping ─────────────────────────
 	function payloadNameToId(name: string): string | undefined {
-		const allDefs = [...marketSatellites, ...venMarsPayloads];
+		const allDefs = [...marketSatellites, ...venMarsPayloads, ...$customPayloads];
 		return allDefs.find(d => d.name === name)?.id;
 	}
 
@@ -732,7 +741,8 @@
 		const launches: LaunchInstance[] = [];
 		if (missionMode === 'repeating') {
 			const intervalHours = repeatIntervalDays * 24;
-			for (let i = 0; i < INITIAL_LAUNCH_BATCH; i++) {
+			const count = Math.min(repeatTotalLaunches, INITIAL_LAUNCH_BATCH);
+			for (let i = 0; i < count; i++) {
 				const hour = firstLaunchHour + i * intervalHours;
 				launches.push({
 					launchNumber: i + 1,
@@ -771,6 +781,7 @@
 			date: launchDate,
 			time: launchTime,
 			repeatDays: repeatIntervalDays,
+			totalLaunches: missionMode === 'repeating' ? repeatTotalLaunches : 1,
 			activities: missionActivities.map(a => ({ ...a })),
 			launchWindow,
 			deployMethod: selectedDeployMethod,
@@ -828,6 +839,7 @@
 		launchDate = m.date;
 		launchTime = m.time ?? '12:00';
 		repeatIntervalDays = m.repeatDays;
+		repeatTotalLaunches = m.totalLaunches || 10;
 		missionActivities = m.activities.map(a => ({ ...a }));
 		launchWindow = m.launchWindow;
 		selectedDeployMethod = m.deployMethod;
@@ -838,36 +850,77 @@
 		missionSubTab = 'designer';
 	}
 
-	// ── Launch status advancement (reactive on game time) ─────────
-	// Advance launch instance statuses based on current game time.
-	// pending → completed once scheduledHour is reached.
-	// For repeating missions, also generate more launch instances when
-	// we're running low on pending ones.
-	const TRANSIT_DURATION_HOURS = 0; // instant for now; future: calculate from orbit
-	const REPLENISH_THRESHOLD = 5;    // generate more when fewer than this remain pending
+	// ── Launch status computation (pure, time-based) ─────────────
+	// Instead of mutating launch.status in an effect (which creates
+	// a read-write cycle Svelte 5 can break), compute effective status
+	// purely from the current game time. This is always correct
+	// regardless of when the component mounts.
+	const REPLENISH_THRESHOLD = 5;
 
 	let currentGameHour = $derived($gameTime);
 
-	// Reactive effect: update launch statuses when game time changes
-	$effect(() => {
-		const now = currentGameHour;
-		let mutated = false;
-		for (const mission of scheduledMissions) {
-			for (const launch of mission.launches) {
-				if (launch.status === 'pending' && launch.scheduledHour <= now) {
-					launch.status = 'completed';
-					mutated = true;
-				}
+	// Compute effective status for a launch based on current time
+	function launchEffectiveStatus(l: LaunchInstance): MissionStatus {
+		if (l.status === 'failed') return 'failed';
+		if (l.consumed) return 'completed';
+		if (l.scheduledHour <= currentGameHour) return 'paused'; // time passed but no inventory
+		return 'pending';
+	}
+
+	// Compute effective status for a whole mission
+	function missionEffectiveStatus(m: ScheduledMission): MissionStatus {
+		const allDone = m.launches.every(l => launchEffectiveStatus(l) === 'completed' || launchEffectiveStatus(l) === 'failed');
+		if (allDone) {
+			return m.launches.some(l => launchEffectiveStatus(l) === 'failed') ? 'failed' : 'completed';
+		}
+		if (m.launches.some(l => launchEffectiveStatus(l) === 'paused')) return 'paused';
+		if (m.launches.some(l => launchEffectiveStatus(l) === 'in-transit')) return 'in-transit';
+		return 'pending';
+	}
+
+	// Check if a mission's payloads are available in inventory
+	// Returns null if all good, or a string explaining the shortage
+	function missionPayloadShortage(m: ScheduledMission): string | null {
+		const inv = $payloadInventory;
+		const reserved = $reservedPayloads;
+		const allDefs = [...marketSatellites, ...venMarsPayloads, ...$customPayloads];
+		for (const pName of m.payloads) {
+			const def = allDefs.find(d => d.name === pName);
+			if (!def) continue;
+			const owned = inv[def.id] ?? 0;
+			const res = reserved[def.id] ?? 0;
+			const available = owned - res;
+			if (owned <= 0) {
+				return `No "${pName}" in inventory — purchase more to resume launches`;
 			}
-			// For repeating missions: generate more launches when running low
-			if (mission.mode === 'repeating') {
-				const pendingCount = mission.launches.filter(l => l.status === 'pending').length;
+		}
+		return null;
+	}
+
+	// Check if a launch should be paused due to payload shortage
+	function isLaunchPaused(m: ScheduledMission, l: LaunchInstance): boolean {
+		return launchEffectiveStatus(l) === 'paused';
+	}
+
+	// Generate more launch instances for repeating missions (effect with untrack)
+	// Stops when totalLaunches is reached.
+	$effect(() => {
+		const now = currentGameHour; // sole reactive dependency
+		untrack(() => {
+			let changed = false;
+			for (const mission of scheduledMissions) {
+				if (mission.mode !== 'repeating') continue;
+				const maxLaunches = mission.totalLaunches || Infinity;
+				if (mission.launches.length >= maxLaunches) continue;
+				const pendingCount = mission.launches.filter(l => l.scheduledHour > now).length;
 				if (pendingCount < REPLENISH_THRESHOLD) {
 					const intervalHours = mission.repeatDays * 24;
 					const lastLaunch = mission.launches[mission.launches.length - 1];
 					const startNum = lastLaunch.launchNumber + 1;
 					const startHour = lastLaunch.scheduledHour + intervalHours;
-					for (let i = 0; i < INITIAL_LAUNCH_BATCH; i++) {
+					const remaining = maxLaunches - mission.launches.length;
+					const batchSize = Math.min(INITIAL_LAUNCH_BATCH, remaining);
+					for (let i = 0; i < batchSize; i++) {
 						const hour = startHour + i * intervalHours;
 						mission.launches.push({
 							launchNumber: startNum + i,
@@ -878,62 +931,133 @@
 							deltaV: mission.totalDeltaV,
 						});
 					}
-					mutated = true;
+					changed = true;
 				}
 			}
-			// Update parent mission status based on launches
-			const allCompleted = mission.launches.every(l => l.status === 'completed' || l.status === 'failed');
-			const anyTransit = mission.launches.some(l => l.status === 'in-transit');
-			if (mission.mode === 'one-off' && allCompleted) {
-				mission.status = mission.launches.some(l => l.status === 'failed') ? 'failed' : 'completed';
-			} else if (anyTransit) {
-				mission.status = 'in-transit';
-			} else if (!allCompleted) {
-				mission.status = 'pending';
+			if (changed) {
+				scheduledMissions = [...scheduledMissions];
 			}
-		}
-		if (mutated) {
-			scheduledMissions = [...scheduledMissions]; // trigger reactivity
-		}
+		});
 	});
 
-	// ── Derived: missions with pending launches (for scheduled tab) ──
+	// ── Consume payloads when launches complete ───────────────────
+	// When a launch's scheduled hour passes (becomes "completed"),
+	// deduct the mission's payloads from inventory and release from reserved.
+	// Each launch is only consumed once (tracked by launch.consumed flag).
+	$effect(() => {
+		const now = currentGameHour; // reactive dependency
+		const _inv = $payloadInventory; // re-trigger when inventory changes (e.g. player buys more)
+		untrack(() => {
+			let anyConsumed = false;
+			for (const mission of scheduledMissions) {
+				for (const launch of mission.launches) {
+					if (launch.consumed) continue;
+					if (launch.status === 'failed') continue;
+					if (launch.scheduledHour > now) continue;
+					// Check that inventory actually has every payload for this launch
+					const currentInv = get(payloadInventory);
+					let canConsume = true;
+					for (const pName of mission.payloads) {
+						const id = payloadNameToId(pName);
+						if (!id) continue;
+						if ((currentInv[id] ?? 0) <= 0) {
+							canConsume = false;
+							break;
+						}
+					}
+					if (!canConsume) continue; // no inventory — launch stays paused
+					// This launch has inventory — consume payloads
+					launch.consumed = true;
+					anyConsumed = true;
+					const newSats: import('$lib/stores/gameStore').DeployedSatellite[] = [];
+					for (const pName of mission.payloads) {
+						const id = payloadNameToId(pName);
+						if (!id) continue;
+						// Deduct from inventory
+						payloadInventory.update(inv => {
+							const current = inv[id] ?? 0;
+							return { ...inv, [id]: Math.max(0, current - 1) };
+						});
+						// Release from reserved (if it was reserved)
+						reservedPayloads.update(rp => {
+							const current = rp[id] ?? 0;
+							if (current > 0) return { ...rp, [id]: current - 1 };
+							return rp;
+						});
+						// Register as deployed satellite for 3D visualization
+						newSats.push({
+							id: `${mission.id}-L${launch.launchNumber}-${id}`,
+							name: pName,
+							missionName: mission.name,
+							site: mission.site,
+							altitude: mission.altitude,
+							inclination: mission.inclination,
+							circular: Math.abs(mission.apoapsis - mission.periapsis) < 1,
+							deployHour: launch.scheduledHour,
+						});
+					}
+					if (newSats.length > 0) {
+						deployedSatellites.update(sats => [...sats, ...newSats]);
+					}
+				}
+			}
+			if (anyConsumed) {
+				scheduledMissions = [...scheduledMissions];
+			}
+		});
+	});
+
+	// ── Derived: missions with future launches (for scheduled tab) ──
+	// Shows missions that still have pending/in-transit launches
 	let activeMissions = $derived(
 		scheduledMissions.filter(m =>
-			m.mode === 'repeating' || m.launches.some(l => l.status === 'pending' || l.status === 'in-transit')
+			m.launches.some(l => {
+				const s = launchEffectiveStatus(l);
+				return s === 'pending' || s === 'in-transit' || s === 'paused';
+			})
 		)
 	);
 
-	// ── Derived: missions where all launches are done (for completed tab) ──
-	// One-off missions move to completed when done.
-	// Repeating missions never "complete" — they stay in scheduled and show a history.
-	let fullyCompletedMissions = $derived(
+	// ── Derived: missions with ANY completed launches (for completed tab) ──
+	// Once a mission has at least one completed launch, it shows in completed.
+	// Repeating missions with a totalLaunches cap also appear here once fully done.
+	let missionsWithCompletedLaunches = $derived(
 		scheduledMissions.filter(m =>
-			m.mode === 'one-off' &&
 			m.launches.length > 0 &&
-			m.launches.every(l => l.status === 'completed' || l.status === 'failed')
+			m.launches.some(l => launchEffectiveStatus(l) === 'completed' || launchEffectiveStatus(l) === 'failed')
 		)
 	);
 
-	// Combined completed: explicitly completed + fully done scheduled
-	let allCompletedMissions = $derived([...completedMissions, ...fullyCompletedMissions]);
+	// Combined completed: explicitly completed + any with completed launches
+	let allCompletedMissions = $derived([...completedMissions, ...missionsWithCompletedLaunches]);
 
 	// ── Per-mission aggregates ────────────────────────────────────
 	function missionCompletedLaunches(m: ScheduledMission): LaunchInstance[] {
-		return m.launches.filter(l => l.status === 'completed' || l.status === 'failed');
+		return m.launches.filter(l => launchEffectiveStatus(l) === 'completed' || launchEffectiveStatus(l) === 'failed');
 	}
 	function missionPendingLaunches(m: ScheduledMission): LaunchInstance[] {
-		return m.launches.filter(l => l.status === 'pending' || l.status === 'in-transit');
+		return m.launches.filter(l => {
+			const s = launchEffectiveStatus(l);
+			return s === 'pending' || s === 'in-transit' || s === 'paused';
+		});
 	}
 	function missionTotalSpent(m: ScheduledMission): number {
-		return m.launches.filter(l => l.status === 'completed').reduce((s, l) => s + l.costM, 0);
+		return m.launches.filter(l => launchEffectiveStatus(l) === 'completed').reduce((s, l) => s + l.costM, 0);
 	}
 	function missionTotalDeltaV(m: ScheduledMission): number {
-		return m.launches.filter(l => l.status === 'completed').reduce((s, l) => s + l.deltaV, 0);
+		return m.launches.filter(l => launchEffectiveStatus(l) === 'completed').reduce((s, l) => s + l.deltaV, 0);
 	}
 
 	// ── Total ΔV ─────────────────────────────────────────
-	let totalDeltaV = $derived(missionActivities.reduce((sum, act) => sum + activityDeltaV(act), 0));
+	// Auto-compute inclination change cost when user deviates from orbit default
+	let inclinationChangeDeltaV = $derived.by(() => {
+		if (!selectedOrbit) return 0;
+		const angleChange = Math.abs(orbitInclination - selectedOrbit.defaultInc);
+		if (angleChange < 0.01) return 0;
+		const alt = selectedOrbit.circular ? orbitAltitude : (orbitPeriapsis + orbitApoapsis) / 2;
+		return dvPlaneChange(alt, angleChange);
+	});
+	let totalDeltaV = $derived(missionActivities.reduce((sum, act) => sum + activityDeltaV(act), 0) + inclinationChangeDeltaV);
 
 	// ── Derived: destination ──────────────────────────────
 	let selectedDest = $derived(destinations.find(d => d.body === selectedBody));
@@ -1244,11 +1368,13 @@
 		<div class="payload-checklist">
 			{#each payloadOptions as p}
 				{@const invCount = payloadInvByName[p.name] ?? 0}
-				<label class="payload-check" class:selected={selectedPayloads.includes(p.name)} class:over-constraint={overAny && selectedPayloads.includes(p.name)} class:has-inventory={invCount > 0}>
-					<input type="checkbox" checked={selectedPayloads.includes(p.name)} onchange={() => togglePayload(p.name)} />
+				<label class="payload-check" class:selected={selectedPayloads.includes(p.name)} class:over-constraint={overAny && selectedPayloads.includes(p.name)} class:has-inventory={invCount > 0} class:no-inventory={invCount === 0}>
+					<input type="checkbox" checked={selectedPayloads.includes(p.name)} onchange={() => togglePayload(p.name)} disabled={invCount === 0} />
 					<span class="check-name">{p.name}</span>
 					{#if invCount > 0}
 						<span class="check-inv">×{invCount}</span>
+					{:else}
+						<span class="check-inv none">none</span>
 					{/if}
 					<span class="check-mass">{formatMass(p.mass)}</span>
 					<span class="check-vol">{p.volume_m3} m³</span>
@@ -1527,6 +1653,9 @@
 							<span class="param-unit">°</span>
 						</div>
 						<span class="param-range">{selectedOrbit.incRange[0]}° – {selectedOrbit.incRange[1]}°</span>
+						{#if inclinationChangeDeltaV > 0}
+							<span class="param-dv-cost">↗️ +{inclinationChangeDeltaV.toFixed(0)} m/s plane change</span>
+						{/if}
 					</div>
 				</div>
 
@@ -1564,6 +1693,13 @@
 					<div class="param-input-row">
 						<input class="param-input" type="number" min="1" max="365" bind:value={repeatIntervalDays} />
 						<span class="param-unit">days</span>
+					</div>
+				</div>
+				<div class="param-field">
+					<span class="param-label">Total Launches</span>
+					<div class="param-input-row">
+						<input class="param-input" type="number" min="2" max="1000" bind:value={repeatTotalLaunches} />
+						<span class="param-unit">launches</span>
 					</div>
 				</div>
 			{/if}
@@ -1831,6 +1967,7 @@
 				<div class="table-header">
 					<span class="th th-name">Mission</span>
 					<span class="th th-vehicle">Vehicle</span>
+					<span class="th th-payload">Payload</span>
 					<span class="th th-dest">Destination</span>
 					<span class="th th-date">Next Launch</span>
 					<span class="th th-dv">ΔV</span>
@@ -1848,8 +1985,10 @@
 					{@const dvTotal = missionTotalDeltaV(sm)}
 					{@const isCollapsed = collapsedMissions.has(sm.id)}
 					{@const smIdx = scheduledMissions.indexOf(sm)}
+					{@const smEffStatus = missionEffectiveStatus(sm)}
+					{@const shortage = missionPayloadShortage(sm)}
 					<!-- Parent mission row -->
-					<div class="table-row" class:status-pending={sm.status === 'pending'} class:status-transit={sm.status === 'in-transit'}>
+					<div class="table-row" class:status-pending={smEffStatus === 'pending'} class:status-transit={smEffStatus === 'in-transit'} class:status-paused={smEffStatus === 'paused'}>
 						<span class="td td-name">
 							{#if sm.launches.length > 1}
 								<button class="collapse-btn" onclick={() => toggleCollapse(sm.id)} title={isCollapsed ? 'Expand launches' : 'Collapse launches'}>
@@ -1858,10 +1997,14 @@
 							{/if}
 							{sm.name}
 							{#if sm.mode === 'repeating'}
-								<span class="repeat-badge">🔁 Every {sm.repeatDays}d</span>
+								<span class="repeat-badge">🔁 Every {sm.repeatDays}d × {sm.totalLaunches || '∞'}</span>
+							{/if}
+							{#if shortage}
+								<span class="pause-icon" title={shortage}>⚠️</span>
 							{/if}
 						</span>
 						<span class="td td-vehicle">{sm.rocket || '—'}</span>
+						<span class="td td-payload" title={sm.payloads.join(', ')}>{sm.payloads.length > 0 ? sm.payloads.join(', ') : '—'}</span>
 						<span class="td td-dest">{destInfo?.icon ?? ''} {orbitInfo?.name?.split('(')[0]?.trim() ?? sm.orbitId}</span>
 						<span class="td td-date">{nextLaunch?.scheduledDateStr ?? '—'}</span>
 						<span class="td td-dv">
@@ -1877,11 +2020,13 @@
 							{/if}
 						</span>
 						<span class="td td-status">
-							{#if sm.mode === 'repeating'}
-								<span class="status-badge pending">🔁 {completed.length} / ∞</span>
-							{:else if sm.status === 'pending'}
+							{#if smEffStatus === 'paused'}
+								<span class="status-badge paused" title={shortage ?? 'Insufficient payload inventory — purchase more to resume'}>⚠️ Paused</span>
+							{:else if sm.mode === 'repeating'}
+								<span class="status-badge pending">🔁 {completed.length} / {sm.totalLaunches || '∞'}</span>
+							{:else if smEffStatus === 'pending'}
 								<span class="status-badge pending">⏳ Pending</span>
-							{:else if sm.status === 'in-transit'}
+							{:else if smEffStatus === 'in-transit'}
 								<span class="status-badge transit">🚀 In Transit</span>
 							{/if}
 						</span>
@@ -1893,29 +2038,35 @@
 					<!-- Indented individual launch rows (collapsible) -->
 					{#if !isCollapsed && sm.launches.length > 1}
 						{#each sm.launches as launch}
+							{@const lStatus = launchEffectiveStatus(launch)}
+							{@const paused = isLaunchPaused(sm, launch)}
 							<div class="table-row launch-row"
-								class:status-complete={launch.status === 'completed'}
-								class:status-pending={launch.status === 'pending'}
-								class:status-transit={launch.status === 'in-transit'}
-								class:status-failed={launch.status === 'failed'}
+								class:status-complete={lStatus === 'completed'}
+								class:status-pending={lStatus === 'pending' && !paused}
+								class:status-paused={paused}
+								class:status-transit={lStatus === 'in-transit'}
+								class:status-failed={lStatus === 'failed'}
 							>
 								<span class="td td-name launch-indent">
 									<span class="launch-connector">└</span>
 									Launch #{launch.launchNumber}
 								</span>
 								<span class="td td-vehicle">—</span>
+								<span class="td td-payload">—</span>
 								<span class="td td-dest">—</span>
 								<span class="td td-date">{launch.scheduledDateStr}</span>
 								<span class="td td-dv">{launch.deltaV.toFixed(0)} m/s</span>
 								<span class="td td-cost">${launch.costM.toLocaleString()}M</span>
 								<span class="td td-status">
-									{#if launch.status === 'completed'}
+									{#if lStatus === 'completed'}
 										<span class="status-badge complete">✅ Done</span>
-									{:else if launch.status === 'pending'}
+									{:else if lStatus === 'paused'}
+										<span class="status-badge paused" title={missionPayloadShortage(sm) ?? 'Insufficient payload inventory — purchase more to resume'}>⚠️ Paused</span>
+									{:else if lStatus === 'pending'}
 										<span class="status-badge pending">⏳</span>
-									{:else if launch.status === 'in-transit'}
+									{:else if lStatus === 'in-transit'}
 										<span class="status-badge transit">🚀</span>
-									{:else if launch.status === 'failed'}
+									{:else if lStatus === 'failed'}
 										<span class="status-badge failed">❌</span>
 									{/if}
 								</span>
@@ -1940,6 +2091,7 @@
 				<div class="table-header">
 					<span class="th th-name">Mission</span>
 					<span class="th th-vehicle">Vehicle</span>
+					<span class="th th-payload">Payload</span>
 					<span class="th th-dest">Destination</span>
 					<span class="th th-date">Date</span>
 					<span class="th th-dv">ΔV</span>
@@ -1953,8 +2105,9 @@
 					{@const spentTotal = missionTotalSpent(cm)}
 					{@const dvTotal = missionTotalDeltaV(cm)}
 					{@const isCollapsed = collapsedMissions.has(cm.id)}
+					{@const cmEffStatus = missionEffectiveStatus(cm)}
 					<!-- Parent mission row -->
-					<div class="table-row status-complete">
+					<div class="table-row" class:status-complete={cmEffStatus === 'completed' || cmEffStatus === 'failed'}>
 						<span class="td td-name">
 							{#if cm.launches.length > 1}
 								<button class="collapse-btn" onclick={() => toggleCollapse(cm.id)} title={isCollapsed ? 'Expand launches' : 'Collapse launches'}>
@@ -1962,8 +2115,12 @@
 								</button>
 							{/if}
 							{cm.name}
+							{#if cm.mode === 'repeating'}
+								<span class="repeat-badge">🔁 {completed.length} / {cm.totalLaunches || '∞'}</span>
+							{/if}
 						</span>
 						<span class="td td-vehicle">{cm.rocket || '—'}</span>
+						<span class="td td-payload" title={cm.payloads.join(', ')}>{cm.payloads.length > 0 ? cm.payloads.join(', ') : '—'}</span>
 						<span class="td td-dest">{destInfo?.icon ?? ''} {orbitInfo?.name?.split('(')[0]?.trim() ?? cm.orbitId}</span>
 						<span class="td td-date">{cm.date} {cm.time ?? ''}</span>
 						<span class="td td-dv">
@@ -1979,33 +2136,37 @@
 							{/if}
 						</span>
 						<span class="td td-status">
-							{#if cm.launches.some(l => l.status === 'failed')}
-								<span class="status-badge failed">❌ {completed.filter(l => l.status === 'failed').length} Failed</span>
-							{:else}
+							{#if cm.launches.some(l => launchEffectiveStatus(l) === 'failed')}
+								<span class="status-badge failed">❌ {completed.filter(l => launchEffectiveStatus(l) === 'failed').length} Failed</span>
+							{:else if cmEffStatus === 'completed'}
 								<span class="status-badge complete">✅ Complete</span>
+							{:else}
+								<span class="status-badge pending">🔄 {completed.length} / {cm.totalLaunches || cm.launches.length} done</span>
 							{/if}
 						</span>
 					</div>
 					<!-- Indented launch rows -->
 					{#if !isCollapsed && cm.launches.length > 1}
 						{#each cm.launches as launch}
+							{@const lStatus = launchEffectiveStatus(launch)}
 							<div class="table-row launch-row"
-								class:status-complete={launch.status === 'completed'}
-								class:status-failed={launch.status === 'failed'}
+								class:status-complete={lStatus === 'completed'}
+								class:status-failed={lStatus === 'failed'}
 							>
 								<span class="td td-name launch-indent">
 									<span class="launch-connector">└</span>
 									Launch #{launch.launchNumber}
 								</span>
 								<span class="td td-vehicle">—</span>
+								<span class="td td-payload">—</span>
 								<span class="td td-dest">—</span>
 								<span class="td td-date">{launch.scheduledDateStr}</span>
 								<span class="td td-dv">{launch.deltaV.toFixed(0)} m/s</span>
 								<span class="td td-cost">${launch.costM.toLocaleString()}M</span>
 								<span class="td td-status">
-									{#if launch.status === 'completed'}
+									{#if lStatus === 'completed'}
 										<span class="status-badge complete">✅</span>
-									{:else if launch.status === 'failed'}
+									{:else if lStatus === 'failed'}
 										<span class="status-badge failed">❌</span>
 									{/if}
 								</span>
@@ -2126,6 +2287,11 @@
 		border-color: rgba(74, 222, 128, 0.25);
 	}
 	.payload-check.has-inventory:hover { background: rgba(74, 222, 128, 0.12); }
+	.payload-check.no-inventory {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+	.payload-check.no-inventory input[type="checkbox"] { cursor: not-allowed; }
 	.payload-check input[type="checkbox"] { accent-color: #6366f1; cursor: pointer; }
 	.check-name { font-weight: 500; }
 	.check-inv {
@@ -2134,6 +2300,12 @@
 		background: rgba(59, 130, 246, 0.15);
 		padding: 0.05rem 0.3rem; border-radius: 999px;
 		border: 1px solid rgba(59, 130, 246, 0.25);
+	}
+	.check-inv.none {
+		color: #ef4444;
+		background: rgba(239, 68, 68, 0.1);
+		border-color: rgba(239, 68, 68, 0.2);
+		font-weight: 500;
 	}
 	.check-mass, .check-vol, .check-cost, .check-dia {
 		color: var(--color-text-dim);
@@ -2265,6 +2437,11 @@
 	.param-range {
 		font-size: 0.5rem; color: var(--color-text-dim);
 		font-family: 'JetBrains Mono', monospace;
+	}
+	.param-dv-cost {
+		font-size: 0.55rem; color: #f59e0b;
+		font-family: 'JetBrains Mono', monospace;
+		font-weight: 600;
 	}
 	.date-input { width: 10rem; }
 	.time-input { width: 6.5rem; }
@@ -2761,7 +2938,7 @@
 	}
 	.table-header {
 		display: grid;
-		grid-template-columns: 2fr 1.2fr 1.5fr 0.8fr 0.8fr 0.8fr 0.9fr 0.6fr;
+		grid-template-columns: 2fr 1fr 1.2fr 1.3fr 0.8fr 0.8fr 0.8fr 0.9fr 0.6fr;
 		gap: 0.3rem;
 		padding: 0.4rem 0.6rem;
 		background: rgba(99, 102, 241, 0.06);
@@ -2776,7 +2953,7 @@
 	}
 	.table-row {
 		display: grid;
-		grid-template-columns: 2fr 1.2fr 1.5fr 0.8fr 0.8fr 0.8fr 0.9fr 0.6fr;
+		grid-template-columns: 2fr 1fr 1.2fr 1.3fr 0.8fr 0.8fr 0.8fr 0.9fr 0.6fr;
 		gap: 0.3rem;
 		padding: 0.4rem 0.6rem;
 		align-items: center;
@@ -2797,6 +2974,7 @@
 	}
 	.td-name { font-weight: 600; }
 	.td-vehicle { color: var(--color-text-dim); }
+	.td-payload { color: var(--color-text-dim); font-size: 0.6rem; }
 	.td-dv, .td-cost {
 		font-family: 'JetBrains Mono', monospace;
 		font-size: 0.6rem;
@@ -2909,4 +3087,18 @@
 
 	/* Failed launch row highlight */
 	.table-row.status-failed { background: rgba(239, 68, 68, 0.03); }
+
+	/* Paused status styling */
+	.table-row.status-paused { background: rgba(245, 158, 11, 0.06); }
+	.status-badge.paused {
+		color: #f59e0b;
+		background: rgba(245, 158, 11, 0.12);
+		border-color: rgba(245, 158, 11, 0.3);
+		cursor: help;
+	}
+	.pause-icon {
+		cursor: help;
+		font-size: 0.75rem;
+		margin-left: 0.2rem;
+	}
 </style>

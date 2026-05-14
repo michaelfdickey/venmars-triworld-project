@@ -887,6 +887,19 @@ export interface ScheduledMissionMapData {
 }
 export const scheduledMissionsStore = writable<ScheduledMissionMapData[]>([]);
 
+// ── Deployed satellites (orbiting objects for 3D visualization) ────
+export interface DeployedSatellite {
+	id: string;            // unique id
+	name: string;          // payload name
+	missionName: string;   // originating mission
+	site: string;          // launch site (for RAAN computation)
+	altitude: number;      // km
+	inclination: number;   // degrees
+	circular: boolean;
+	deployHour: number;    // game hour when deployed (for phase offset)
+}
+export const deployedSatellites = writable<DeployedSatellite[]>([]);
+
 // ── Earth material stockpiles ─────────────────────────────────────
 // Index matches materialDefs.  Values in tonnes (except Electricity index 16 = MWh).
 export const earthMaterialStockpiles = writable<number[]>(materialDefs.map(() => 0));

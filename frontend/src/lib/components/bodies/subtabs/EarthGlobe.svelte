@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import * as THREE from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-	import { scheduledMissionsStore, gameTime, gameTimeToDate, claimedComplexes, type ScheduledMissionMapData } from '$lib/stores/gameStore';
+	import { scheduledMissionsStore, deployedSatellites, gameTime, gameTimeToDate, claimedComplexes, type ScheduledMissionMapData } from '$lib/stores/gameStore';
 	import { get } from 'svelte/store';
 
 	let { onSiteClick = (_name: string) => {} }: { onSiteClick?: (name: string) => void } = $props();
@@ -118,6 +118,7 @@
 	let showMissions = $state(true);
 	let showDayNight = $state(false);
 	let showLaunchSites = $state(true);
+	let showSatellites = $state(true);
 	let mounted = $state(false);
 
 	// ── Camera presets ────────────────────────────────────
@@ -980,6 +981,112 @@
 		}
 	}
 
+	// ══════════════════════════════════════════════════════
+	//  SATELLITE SYSTEM — orbiting dots for deployed payloads
+	// ══════════════════════════════════════════════════════
+	let satelliteGroup: THREE.Group;
+	const satDotGeo = new THREE.SphereGeometry(0.008, 8, 6);
+
+	interface SatelliteDot {
+		id: string;
+		mesh: THREE.Mesh;
+		ringMesh: THREE.Line;  // faint orbit ring
+		altitude: number;
+		inclination: number;
+		raanDeg: number;
+		periodH: number;       // orbital period in hours
+		deployHour: number;    // for phase offset
+	}
+	let satelliteDots: SatelliteDot[] = [];
+
+	function rebuildSatellites(sats: import('$lib/stores/gameStore').DeployedSatellite[]) {
+		if (!scene || !satelliteGroup) return;
+		// Clear previous
+		while (satelliteGroup.children.length > 0) {
+			const child = satelliteGroup.children[0];
+			satelliteGroup.remove(child);
+			if (child instanceof THREE.Mesh) {
+				if (child.material instanceof THREE.Material) child.material.dispose();
+			}
+			if (child instanceof THREE.Line) {
+				child.geometry.dispose();
+				if (child.material instanceof THREE.Material) child.material.dispose();
+			}
+		}
+		satelliteDots = [];
+
+		for (const sat of sats) {
+			// Resolve launch site for RAAN
+			const siteLoc = resolveSite(sat.site);
+			const siteLat = siteLoc ? siteLoc[0] : 0;
+			const siteLng = siteLoc ? siteLoc[1] : 0;
+			const raanDeg = computeRaan(siteLat, siteLng, sat.inclination);
+			const periodH = orbitalPeriodH(sat.altitude);
+
+			// Faint orbit ring
+			const ringGeo = makeOrbitRing(sat.altitude, sat.inclination, raanDeg, 128);
+			const ringMat = new THREE.LineDashedMaterial({
+				color: 0x38bdf8,
+				dashSize: 0.015,
+				gapSize: 0.025,
+				opacity: 0.15,
+				transparent: true,
+			});
+			const ringLine = new THREE.Line(ringGeo, ringMat);
+			ringLine.computeLineDistances();
+			satelliteGroup.add(ringLine);
+
+			// Satellite dot
+			const dotMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+			const dotMesh = new THREE.Mesh(satDotGeo, dotMat);
+			satelliteGroup.add(dotMesh);
+
+			satelliteDots.push({
+				id: sat.id,
+				mesh: dotMesh,
+				ringMesh: ringLine,
+				altitude: sat.altitude,
+				inclination: sat.inclination,
+				raanDeg,
+				periodH,
+				deployHour: sat.deployHour,
+			});
+		}
+	}
+
+	function updateSatelliteDots(currentGameHours: number) {
+		for (const sd of satelliteDots) {
+			const elapsed = currentGameHours - sd.deployHour;
+			if (elapsed < 0) {
+				sd.mesh.visible = false;
+				continue;
+			}
+			sd.mesh.visible = true;
+			// Angle = (elapsed / period) * 360, plus an offset based on deploy hour for spread
+			const angleDeg = ((elapsed / sd.periodH) * 360) % 360;
+			const pos = orbitPoint(sd.altitude, sd.inclination, sd.raanDeg, angleDeg);
+			sd.mesh.position.copy(pos);
+		}
+	}
+
+	// ── Reactive: rebuild satellites when store changes ───
+	$effect(() => {
+		if (!mounted) return;
+		const sats = $deployedSatellites;
+		const visible = showSatellites;
+		if (visible) {
+			rebuildSatellites(sats);
+		} else if (satelliteGroup) {
+			// Clear
+			while (satelliteGroup.children.length > 0) {
+				const child = satelliteGroup.children[0];
+				satelliteGroup.remove(child);
+			}
+			satelliteDots = [];
+		}
+		if (satelliteGroup) satelliteGroup.visible = visible;
+	});
+
 	// ── Rebuild all mission visuals ──────────────────────
 	function rebuildMissions(missions: ScheduledMissionMapData[]) {
 		if (!scene || !missionGroup) return;
@@ -1079,6 +1186,10 @@
 		// Rocket animation group
 		rocketGroup = new THREE.Group();
 		scene.add(rocketGroup);
+
+		// Satellite orbit group
+		satelliteGroup = new THREE.Group();
+		scene.add(satelliteGroup);
 
 		// Launch site markers group
 		siteGroup = new THREE.Group();
@@ -1236,6 +1347,11 @@
 			// Animate rocket dots based on current game time
 			updateRocketDots(get(gameTime));
 
+			// Animate satellite dots in their orbits
+			if (satelliteGroup.visible) {
+				updateSatelliteDots(get(gameTime));
+			}
+
 			// Per-marker scale to lock apparent size when zoomed in
 			if (siteGroup.visible) {
 				const dist = camera.position.length();
@@ -1266,6 +1382,21 @@
 				}
 			}
 
+			// Scale satellite dots too
+			if (satelliteGroup.visible) {
+				const dist = camera.position.length();
+				if (dist < LOCK_DIST) {
+					const s = dist / LOCK_DIST;
+					for (const sd of satelliteDots) {
+						sd.mesh.scale.setScalar(s);
+					}
+				} else {
+					for (const sd of satelliteDots) {
+						sd.mesh.scale.setScalar(1);
+					}
+				}
+			}
+
 			renderer.render(scene, camera);
 		}
 		animate();
@@ -1284,6 +1415,7 @@
 			atmosphereMaterial.dispose();
 			starGeometry.dispose();
 			starMaterial.dispose();
+			satDotGeo.dispose();
 			container?.removeChild(renderer.domElement);
 		};
 	});
@@ -1308,6 +1440,10 @@
 			<input type="checkbox" bind:checked={showMissions} />
 			<span>Planned Missions</span>
 		</label>
+		<label class="globe-toggle">
+			<input type="checkbox" bind:checked={showSatellites} />
+			<span>Satellites</span>
+		</label>
 	</div>
 	{#if showMissions}
 	<div class="globe-legend">
@@ -1318,6 +1454,12 @@
 		<span class="legend-item"><span class="legend-swatch" style="background: #ef4444;"></span> Deorbit</span>
 		<span class="legend-item"><span class="legend-swatch" style="background: #22c55e;"></span> Booster Return</span>
 		<span class="legend-item"><span class="legend-swatch" style="background: #ffffff; border: 1px solid #666;"></span> Active Rocket</span>
+	</div>
+	{/if}
+	{#if showSatellites}
+	<div class="globe-legend">
+		<span class="legend-item"><span class="legend-swatch" style="background: #38bdf8;"></span> Satellite</span>
+		<span class="legend-item legend-dim">({$deployedSatellites.length} in orbit)</span>
 	</div>
 	{/if}
 </div>
@@ -1398,5 +1540,9 @@
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
+	}
+	.legend-dim {
+		opacity: 0.5;
+		font-style: italic;
 	}
 </style>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { venMarsPayloads, payloadCategoryLabels, payloadCategoryIcons, payloadInventory, type PayloadCategory, type PayloadDef } from '$lib/stores/gameStore';
+	import { venMarsPayloads, payloadCategoryLabels, payloadCategoryIcons, payloadInventory, cashBalanceM, type PayloadCategory, type PayloadDef } from '$lib/stores/gameStore';
 
 	let { bodyId }: { bodyId: string } = $props();
 
@@ -211,6 +211,7 @@
 				</span>
 				<button class="buy-btn" onclick={() => {
 					payloadInventory.update(inv => ({ ...inv, [detailPayload!.id]: (inv[detailPayload!.id] ?? 0) + 1 }));
+					cashBalanceM.update(b => b - detailPayload!.cost);
 				}}>
 					Order (${detailPayload.cost}M)
 				</button>
